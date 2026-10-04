@@ -28,10 +28,42 @@ const FALLBACK_ARTISTS = [
 ];
 
 const FALLBACK_POSTS = [
-  ['中文说唱和K-POP的现场差异', 'Melo7', '一个更靠近叙事，一个更靠近编舞，但观众都在等待灯光亮起。'],
-  ['你心目中的年度最佳 Rap Album？', 'HIPKOP 社区', '国内外说唱一起投票，欢迎留下你的选择和理由。'],
-  ['从鼓点到舞台：HipHop × K-POP', 'Echo Chamber', '采样、舞蹈和视觉设计正在越来越紧密地交汇。']
+  { title: '中文说唱和 K-POP 的现场差异', author: 'Melo7', body: '一个更靠近叙事，一个更靠近编舞，但观众都在等待灯光亮起。', category: '现场' },
+  { title: '你心目中的年度最佳 Rap Album？', author: 'HIPKOP 社区', body: '国内外说唱一起投票，欢迎留下你的选择和理由。', category: '单曲评价' },
+  { title: '从鼓点到舞台：HipHop × K-POP', author: 'Echo Chamber', body: '采样、舞蹈和视觉设计正在越来越紧密地交汇。', category: '话题' }
 ];
+
+const COMMUNITY_TYPES = [
+  { id: 'artist', label: '艺人评价', icon: '✦', hint: '为艺人的风格、现场与影响力打分' },
+  { id: 'track', label: '单曲评价', icon: '♫', hint: '留下这首歌为什么值得循环的理由' },
+  { id: 'live', label: '现场评价', icon: '▣', hint: '分享演出、舞台与现场声音' },
+  { id: 'topic', label: '话题分类', icon: '#', hint: '发起一个让 Rap 与 K-POP 互通的话题' }
+];
+
+const HOT_KEYWORDS = [
+  ['新专辑首发', '2.8k'],
+  ['现场还原度', '1.9k'],
+  ['中文说唱出海', '1.6k'],
+  ['K-POP 回归季', '1.4k'],
+  ['地下新声', '980']
+];
+
+function readCommunityPosts() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem('hipkop-community-posts') || 'null');
+    return Array.isArray(saved) && saved.length ? saved : FALLBACK_POSTS.slice();
+  } catch {
+    return FALLBACK_POSTS.slice();
+  }
+}
+
+function saveCommunityPosts() {
+  try {
+    window.localStorage.setItem('hipkop-community-posts', JSON.stringify(state.communityPosts.slice(0, 100)));
+  } catch {
+    // Private browsing or disabled storage should not break posting in-memory.
+  }
+}
 
 /* -------------------------------- state ---------------------------------- */
 
@@ -46,7 +78,12 @@ const state = {
   chartGenre: 'all',
   chartSort: 'popularity',
   charts: [],
-  discover: null
+  discover: null,
+  communityFilter: 'all',
+  communityTopic: '',
+  communityComposer: null,
+  communityFiles: [],
+  communityPosts: readCommunityPosts()
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -108,19 +145,100 @@ const emptyState = (text) => `<p class="empty">${esc(text)}</p>`;
 
 function isCoreCulture(item) {
   const genre = String(item?.genre || '').toLowerCase();
-  return /hip.?hop|rap|k.?pop|korean pop/.test(genre);
+  const text = `${genre} ${item?.artist || ''} ${item?.title || ''}`.toLowerCase();
+  return /hip.?hop|rap|k.?pop|korean pop|中文说唱|华语说唱|korean/.test(text);
+}
+
+function cultureBucket(item) {
+  const genre = String(item?.genre || '').toLowerCase();
+  if (/k.?pop|korean pop/.test(genre)) return 'kpop';
+  const artist = String(item?.artist || item?.artistDisplay || '').toLowerCase();
+  const region = String(item?.region || '').toLowerCase();
+  const chinese = /[\u4e00-\u9fff]/.test(artist) || /china|中国|taiwan|台湾|hong kong|香港/.test(region);
+  return chinese ? 'rap-cn' : 'rap-global';
+}
+
+function balancedCharts(items, limit = 50) {
+  const groups = { 'rap-cn': [], 'rap-global': [], kpop: [] };
+  for (const item of items || []) {
+    if (!isCoreCulture(item)) continue;
+    const bucket = cultureBucket(item);
+    if (groups[bucket]) groups[bucket].push(item);
+  }
+  const result = [];
+  const order = ['rap-cn', 'rap-global', 'kpop'];
+  let cursor = 0;
+  while (result.length < limit && order.some((key) => groups[key].length)) {
+    const key = order[cursor % order.length];
+    if (groups[key].length) result.push(groups[key].shift());
+    cursor += 1;
+  }
+  return result;
+}
+
+// Keep editorial/random modules representative of all three core cultures
+// without changing the chronological order of the release rail itself.
+function balancedItems(items, limit = 10) {
+  const groups = { 'rap-cn': [], 'rap-global': [], kpop: [] };
+  for (const item of items || []) {
+    const bucket = cultureBucket(item);
+    (groups[bucket] || groups['rap-global']).push(item);
+  }
+  const result = [];
+  const order = ['rap-cn', 'rap-global', 'kpop'];
+  let cursor = 0;
+  while (result.length < limit && order.some((key) => groups[key].length)) {
+    const key = order[cursor % order.length];
+    if (groups[key].length) result.push(groups[key].shift());
+    cursor += 1;
+  }
+  return result;
+}
+
+function heatValue(item) {
+  const explicit = Number(item?.searchHeat ?? item?.heat ?? item?.popularity);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const comments = Number(item?.comments) || 0;
+  const score = Number(item?.score) || 0;
+  const date = item?.releaseDate ? new Date(item.releaseDate).getTime() : 0;
+  const freshness = date ? Math.max(0, (date - Date.now() + 1000 * 86400 * 365) / (1000 * 86400 * 365)) : 0;
+  return comments * 1.4 + score * 42 + freshness * 10;
+}
+
+function heatPercent(item, collection = state.charts) {
+  const values = (collection || []).map(heatValue);
+  const max = Math.max(1, ...values);
+  return Math.max(1, Math.min(99, Math.round((heatValue(item) / max) * 100)));
+}
+
+function uniqueItems(items) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    if (!item || !item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function formatReleaseDate(item) {
+  const value = item?.releaseDate || item?.year || '';
+  return value ? String(value).slice(0, 10) : '日期待同步';
+}
+
+function communityCategoryLabel(category) {
+  return COMMUNITY_TYPES.find((item) => item.id === category)?.label || '内容';
 }
 
 /* --------------------------------- pages ---------------------------------- */
 
 function heroSection() {
-  return `<section class="hero"><div class="hero-copy"><div class="hero-kicker"><span class="pulse"></span> HIPKOP / CULTURE FEED · 2026</div><h1>下一首，<em>必须有态度。</em></h1><p>全球 Hip-Hop、Rap 与 K-POP 的新作、榜单和现场讨论。给今天的耳朵，一点不一样。</p><div class="hero-meta"><span>GLOBAL RAP</span><span>K-POP</span><span>COMMUNITY</span></div><div class="hero-actions"><button class="cta" onclick="navigate('discover')">开始探索 <b>↗</b></button><button class="ghost-cta" onclick="navigate('charts')">看本周榜单</button></div></div><div class="hero-art"><div class="hero-art-grid"></div><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-sticker sticker-top">TURN<br>IT<br>UP</div><div class="hero-sticker sticker-bottom">H / K<br><small>NO SKIPS</small></div><span class="hero-art-word">HYPE<br>MODE</span><span class="hero-index">001 / 026</span></div></section>`;
+  return `<section class="hero"><div class="hero-copy"><div class="hero-kicker"><span class="pulse"></span> HIPKOP / CULTURE FEED · 2026</div><h1>下一首，<em>和你同频。</em></h1><p>把主流发行、小众地下与潮流 K-POP 放进同一张地图。这里不只听歌，也发现风格、现场和正在发生的共鸣。</p><div class="hero-meta"><span>GLOBAL RAP</span><span>K-POP</span><span>COMMUNITY</span></div><div class="hero-actions"><button class="cta" onclick="navigate('discover')">开始探索 <b>↗</b></button><button class="ghost-cta" onclick="navigate('charts')">看本周榜单</button></div></div><div class="hero-art"><div class="hero-art-grid"></div><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-sticker sticker-top">TURN<br>IT<br>UP</div><div class="hero-sticker sticker-bottom">H / K<br><small>NO SKIPS</small></div><span class="hero-art-word">HYPE<br>MODE</span><span class="hero-index">001 / 026</span></div></section>`;
 }
 
 function pickView() {
   const pick = state.pick || state.releases[0] || FALLBACK_ALBUMS[0];
   const kind = pick.kind === 'single' ? 'SINGLE' : 'ALBUM';
-  return `<div class="pick-card" onclick="openItem('${esc(pick.id)}')">${cover(pick, 'pick-cover')}<div><span class="eyebrow">RANDOM PICK · ${kind}</span><h3>${esc(pick.title)}</h3><p>${esc(pick.artist)}${pick.genre ? ' · ' + esc(pick.genre) : ''}</p></div><button onclick="event.stopPropagation();randomPick();paint();">换一个</button></div>`;
+  return `<div class="pick-card" onclick="openItem('${esc(pick.id)}')">${cover(pick, 'pick-cover')}<div><span class="eyebrow">RANDOM PICK · ${kind}</span><h3>${esc(pick.title)}</h3><p>${esc(pick.artist)}${pick.genre ? ' · ' + esc(pick.genre) : ''}</p></div><button type="button" onclick="event.stopPropagation();changePick();">换一个</button></div>`;
 }
 
 function offlineNotice() {
@@ -128,44 +246,71 @@ function offlineNotice() {
 }
 
 async function viewHome() {
-  const data = await safeApi('/api/releases?limit=12', null);
+  const data = await safeApi('/api/releases?limit=50', null);
   const remoteReleases = data && Array.isArray(data.items) ? data.items : [];
   const cultureReleases = remoteReleases.filter(isCoreCulture);
-  state.releases = (cultureReleases.length ? cultureReleases : remoteReleases).slice(0, 16);
+  state.releases = (cultureReleases.length ? cultureReleases : remoteReleases)
+    .slice()
+    .sort((a, b) => String(b.releaseDate || '').localeCompare(String(a.releaseDate || '')))
+    .slice(0, 16);
   if (!state.releases.length) state.releases = FALLBACK_ALBUMS;
-  const chartsData = await safeApi('/api/charts?limit=6', null);
+  const chartsData = await safeApi('/api/charts?limit=50', null);
   const remoteCharts = chartsData && Array.isArray(chartsData.items) ? chartsData.items : [];
   const cultureCharts = remoteCharts.filter(isCoreCulture);
-  state.charts = (cultureCharts.length ? cultureCharts : remoteCharts).slice(0, 8);
+  state.charts = balancedCharts(cultureCharts.length ? cultureCharts : remoteCharts, 50);
   if (!state.charts.length) state.charts = FALLBACK_ALBUMS.slice(0, 5);
-  state.pick = null;
+  if (!state.pick || !state.releases.some((item) => item.id === state.pick.id)) randomPick();
 
   const latest = state.releases;
   const charts = state.charts.slice(0, 6);
+  const editorialPool = uniqueItems([...state.charts, ...state.releases, ...FALLBACK_ALBUMS])
+    .filter(isCoreCulture)
+    .sort((a, b) => heatValue(b) - heatValue(a));
+  const seasonal = balancedItems(editorialPool, 10);
   return `${offlineNotice()}${heroSection()}
     <section class="section"><div class="section-head"><h2>新作</h2><a onclick="navigate('discover')">查看全部 →</a></div><div class="release-scroller">${latest.map(releaseCard).join('')}</div></section>
     <section class="section"><div class="section-head"><h2>今天听点儿</h2><span class="section-action" onclick="randomPick();paint();">换一个 ↻</span></div>${pickView()}</section>
-    <section class="section"><div class="section-head"><h2>编辑推荐</h2><a onclick="navigate('discover')">查看全部 →</a></div><div class="cards">${latest.slice(0, 4).map(albumCard).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>本周热评</h2><a onclick="navigate('community')">进入社区 →</a></div><div class="rank-list">${charts.map((album, index) => `<div class="rank" onclick="openItem('${esc(album.id)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}</div></div><span class="score">${album.score != null ? Number(album.score).toFixed(1) : '—'}</span></div>`).join('')}</div></section>`;
+    <section class="section"><div class="section-head"><h2>当季热听</h2><a onclick="navigate('charts')">查看 TOP 10 →</a></div><div class="cards">${seasonal.map(albumCard).join('')}</div></section>
+    <section class="section"><div class="section-head"><h2>我们都在聊？</h2><a onclick="navigate('community')">进入社区 →</a></div><div class="keyword-list">${HOT_KEYWORDS.map(([keyword, count], index) => `<button type="button" class="keyword-row" onclick="openCommunityTopic('${esc(keyword)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><b>#${esc(keyword)}</b><small>${esc(count)} 人在聊 →</small></button>`).join('')}</div></section>`;
 }
 
 function chartsList() {
   if (!state.charts.length) return emptyState('暂无榜单数据。首次同步完成后将显示真实榜单。');
-  return `<div class="rank-list">${state.charts.map((album, index) => `<div class="rank" onclick="openItem('${esc(album.id)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}${album.year ? ' · ' + esc(album.year) : ''}</div></div><span class="score">${album.score != null ? Number(album.score).toFixed(1) : '—'}</span></div>`).join('')}</div>`;
+  return `<div class="rank-list">${state.charts.map((album, index) => {
+    const metric = state.chartSort === 'date'
+      ? formatReleaseDate(album)
+      : state.chartSort === 'popularity'
+        ? `🔥 ${heatPercent(album)}%`
+        : album.score != null ? Number(album.score).toFixed(1) : '—';
+    return `<div class="rank" style="grid-template-columns:28px 42px minmax(0,1fr) auto" onclick="openItem('${esc(album.id)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><div style="width:42px;height:42px">${cover(album, 'rank-cover')}</div><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}</div></div><span class="score">${esc(metric)}</span></div>`;
+  }).join('')}</div>`;
 }
 
 async function loadCharts() {
   const params = new URLSearchParams({ genre: state.chartGenre, sort: state.chartSort, limit: '50' });
   const data = await safeApi(`/api/charts?${params}`, null);
-  state.charts = data && data.items ? data.items : [];
+  let items = data && Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    items = FALLBACK_ALBUMS.filter((item) => {
+      if (state.chartGenre === 'kpop') return cultureBucket(item) === 'kpop';
+      if (state.chartGenre === 'hiphop') return cultureBucket(item) !== 'kpop';
+      return true;
+    });
+  }
+  const sorted = items.slice().sort((a, b) => {
+    if (state.chartSort === 'date') return String(b.releaseDate || '').localeCompare(String(a.releaseDate || ''));
+    if (state.chartSort === 'score') return (Number(b.score) || 0) - (Number(a.score) || 0);
+    return heatValue(b) - heatValue(a);
+  });
+  state.charts = state.chartSort === 'date' ? sorted : balancedCharts(sorted, 50);
 }
 
 async function viewCharts() {
   await loadCharts();
-  return `<div class="page-title"><span class="eyebrow">HIPKOP CHARTS</span><h1>榜单</h1><p>Rap 与 K-POP 跨风格榜单 · 数据来自元数据 Provider 与 Apple 榜单同步</p>
+  return `<div class="page-title"><span class="eyebrow">HIPKOP CHARTS</span><h1>榜单</h1><p>让不同语言、不同场景的潮流音乐在同一张榜单里被看见。</p>
     <div class="chips">
       <button class="chip ${state.chartGenre === 'all' ? 'active' : ''}" onclick="setChartGenre('all')">综合 TOP 50</button>
-      <button class="chip ${state.chartGenre === 'rap' ? 'active' : ''}" onclick="setChartGenre('rap')">Rap TOP 50</button>
+      <button class="chip ${state.chartGenre === 'hiphop' ? 'active' : ''}" onclick="setChartGenre('hiphop')">Hip-Hop TOP 50</button>
       <button class="chip ${state.chartGenre === 'kpop' ? 'active' : ''}" onclick="setChartGenre('kpop')">K-POP TOP 50</button>
     </div>
     <div class="sort-row"><label>排序</label><select onchange="setChartSort(this.value)">
@@ -197,15 +342,31 @@ function searchResultsHtml(result) {
 }
 
 function viewDiscover() {
-  return `<div class="page-title"><span class="eyebrow">DISCOVER</span><h1>发现</h1><p>从新发行到深度内容，找到下一张想听的专辑。</p></div>
+  return `<div class="page-title"><span class="eyebrow">DISCOVER</span><h1>发现</h1><p>搜索艺人、专辑和单曲，也搜索正在互通的文化线索。</p></div>
     <section class="section discover-search"><div class="inline-search"><input id="discoverInput" placeholder="搜索艺人、专辑、单曲或组合" oninput="onDiscoverInput()"><button onclick="runDiscover()">搜索</button></div><div id="discoverResults">${searchResultsHtml(state.discover)}</div></section>
     ${offlineNotice()}
     <section class="section"><div class="feature-grid"><article class="feature"><b>RAP · GLOBAL</b><h3>全球说唱<br>新声地图</h3><p>从中文说唱到欧美地下，发现下一位想关注的艺人。</p></article><article class="feature"><b>K-POP · EDITORIAL</b><h3>回归季<br>视觉档案</h3><p>记录每一次 comeback 的专辑、舞台和视觉语言。</p></article></div></section>`;
 }
 
 function viewCommunity() {
-  return `<div class="page-title"><span class="eyebrow">COMMUNITY</span><h1>社区</h1><p>和同样热爱 HipHop 与 K-POP 的人，分享听见的每个瞬间。</p><button class="cta" onclick="toast('登录后即可发布内容')">＋ 发布内容</button></div>
-    <section class="section"><div class="chips"><span class="chip active">全部</span><span class="chip">Rap</span><span class="chip">K-POP</span><span class="chip">现场</span></div><div class="community-list">${FALLBACK_POSTS.map((post) => `<article class="post" onclick="toast('登录后可查看完整讨论')"><div class="post-meta"><span>${esc(post[1])}</span><span>刚刚</span></div><h3>${esc(post[0])}</h3><p>${esc(post[2])}</p></article>`).join('')}</div></section>`;
+  const filter = state.communityFilter;
+  const filtered = state.communityPosts.filter((post) => filter === 'all' || post.category === filter || (filter === 'rap' && /说唱|Rap|中文|HipHop/i.test(post.title + post.body)) || (filter === 'kpop' && /K-POP/i.test(post.title + post.body)) || (filter === 'live' && /现场/.test(post.category)));
+  const topicNote = state.communityTopic ? `<div class="discover-hint">正在浏览话题：<b>#${esc(state.communityTopic)}</b></div>` : '';
+  return `<div class="page-title"><span class="eyebrow">COMMUNITY</span><h1>社区</h1><p>音乐榜单之外，这里讨论最新发行、艺人、单曲和现场，让不同语言的潮流文化真正互通。</p><button class="cta" onclick="openCommunityComposer('topic')">＋ 发布内容</button></div>
+    <section class="section"><div class="chips"><button type="button" class="chip ${filter === 'all' ? 'active' : ''}" onclick="setCommunityFilter('all')">全部</button><button type="button" class="chip ${filter === 'rap' ? 'active' : ''}" onclick="setCommunityFilter('rap')">Rap</button><button type="button" class="chip ${filter === 'kpop' ? 'active' : ''}" onclick="setCommunityFilter('kpop')">K-POP</button><button type="button" class="chip ${filter === 'live' ? 'active' : ''}" onclick="setCommunityFilter('live')">现场</button></div>
+    <div class="community-type-grid">${COMMUNITY_TYPES.map((type) => `<button type="button" class="feature" onclick="openCommunityComposer('${type.id}')"><b>${type.icon} ${esc(type.label)}</b><h3>${esc(type.label)}</h3><p>${esc(type.hint)} →</p></button>`).join('')}</div>
+    ${communityFormHtml()}${topicNote}<div class="community-list">${filtered.map((post) => `<article class="post" onclick="openCommunityComposer('${post.category === '现场' || post.category === '现场评价' ? 'live' : post.category === '话题' ? 'topic' : post.category === '艺人评价' ? 'artist' : 'track'}')"><div class="post-meta"><span>${esc(post.author)}</span><span>${esc(post.category)}${post.rating ? ` · ${esc(post.rating)}.0 分` : ''} · 刚刚</span></div><h3>${esc(post.title)}</h3><p>${esc(post.body)}</p>${post.mediaCount ? `<small class="community-post-category">${esc(post.mediaCount)} 个媒体附件</small>` : ''}</article>`).join('') || emptyState('这个分类还没有内容，来发布第一条吧。')}</div></section>`;
+}
+
+function communityFormHtml() {
+  if (!state.communityComposer) return '';
+  const label = communityCategoryLabel(state.communityComposer);
+  const isTopic = state.communityComposer === 'topic';
+  return `<section class="section community-composer"><div class="section-head"><h2>${esc(label)}</h2><button type="button" class="section-action" onclick="closeCommunityComposer()">关闭 ×</button></div>
+    <label style="display:block;font-size:10px;color:var(--muted);margin:8px 0">${isTopic ? '话题标题' : '评分对象'}<input id="communitySubject" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #ffffff24;border-radius:6px;background:#141620;color:var(--ink)" placeholder="${isTopic ? '例如：今年最值得现场看的回归' : '输入艺人或单曲名称'}"></label>
+    <label style="display:block;font-size:10px;color:var(--muted);margin:8px 0">评分 <select id="communityRating" style="margin-left:8px;padding:7px;background:#141620;color:var(--ink);border:1px solid #ffffff24;border-radius:5px"><option value="5">★★★★★ 5.0</option><option value="4">★★★★☆ 4.0</option><option value="3">★★★☆☆ 3.0</option><option value="2">★★☆☆☆ 2.0</option><option value="1">★☆☆☆☆ 1.0</option></select></label>
+    <textarea id="communityReason" rows="4" style="display:block;width:100%;margin:8px 0;padding:10px;border:1px solid #ffffff24;border-radius:6px;background:#141620;color:var(--ink);resize:vertical" placeholder="写下你的理由、听感或现场细节…"></textarea>
+    <label style="display:block;padding:10px;border:1px dashed #ffffff2b;border-radius:6px;color:var(--muted);font-size:10px;cursor:pointer">＋ 添加图片或视频<input id="communityMedia" type="file" accept="image/*,video/*" multiple style="display:none" onchange="previewCommunityFiles(this)"></label><div id="communityFileHint" class="discover-hint">${state.communityFiles.length ? `${state.communityFiles.length} 个文件已选择` : '支持 JPG、PNG、GIF、MP4 等格式'}</div><div id="communityMediaPreview" class="media-preview"></div><button type="button" class="cta" onclick="submitCommunityPost()">发布${esc(label)}</button></section>`;
 }
 
 function viewProfile() {
@@ -323,9 +484,15 @@ function followArtist() {
 }
 
 function randomPick() {
-  const pool = state.releases.length ? state.releases : FALLBACK_ALBUMS;
-  state.pick = pool[Math.floor(Math.random() * pool.length)];
+  const pool = balancedItems(uniqueItems([...state.releases, ...FALLBACK_ALBUMS]), 12);
+  const choices = pool.filter((item) => !state.pick || item.id !== state.pick.id);
+  state.pick = (choices.length ? choices : pool)[Math.floor(Math.random() * (choices.length || pool.length))];
   return state.pick;
+}
+
+function changePick() {
+  randomPick();
+  if (state.page === 'home') paint();
 }
 
 function toggleLike(id) {
@@ -351,20 +518,67 @@ function toast(message) {
   setTimeout(() => element.classList.remove('show'), 2200);
 }
 
-function toggleSearch() {
-  const bar = $('#searchbar');
-  bar.classList.toggle('hidden');
-  if (!bar.classList.contains('hidden')) $('#searchInput').focus();
+function setCommunityFilter(filter) {
+  state.communityFilter = filter;
+  state.communityTopic = '';
+  paint();
 }
 
-function search() {
-  const query = ($('#searchInput').value || '').trim();
-  if (!query) return;
-  navigate('discover').then(() => {
-    const input = $('#discoverInput');
-    if (input) input.value = query;
-    runDiscover(query);
+function openCommunityTopic(topic) {
+  state.communityTopic = topic;
+  state.communityFilter = 'all';
+  navigate('community');
+}
+
+function openCommunityComposer(category) {
+  state.communityComposer = category;
+  state.communityFiles = [];
+  if (state.page !== 'community') state.page = 'community';
+  paint();
+}
+
+function closeCommunityComposer() {
+  state.communityComposer = null;
+  state.communityFiles = [];
+  paint();
+}
+
+function previewCommunityFiles(input) {
+  state.communityFiles = Array.from(input?.files || []);
+  const hint = $('#communityFileHint');
+  if (hint) hint.textContent = state.communityFiles.length ? `${state.communityFiles.length} 个文件已选择：${state.communityFiles.map((file) => file.name).join('、')}` : '支持 JPG、PNG、GIF、MP4 等格式';
+  const preview = $('#communityMediaPreview');
+  if (!preview) return;
+  preview.innerHTML = '';
+  for (const file of state.communityFiles) {
+    const url = URL.createObjectURL(file);
+    const node = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
+    node.src = url;
+    node.title = file.name;
+    if (node.tagName === 'VIDEO') node.controls = true;
+    preview.appendChild(node);
+  }
+}
+
+function submitCommunityPost() {
+  const subject = ($('#communitySubject')?.value || '').trim();
+  const reason = ($('#communityReason')?.value || '').trim();
+  if (!subject || !reason) return toast('请填写对象/标题和理由');
+  const rating = $('#communityRating')?.value;
+  const label = communityCategoryLabel(state.communityComposer);
+  state.communityPosts.unshift({
+    title: subject,
+    author: '本地用户',
+    body: reason,
+    category: label,
+    rating: rating || null,
+    mediaCount: state.communityFiles.length
   });
+  saveCommunityPosts();
+  toast(`${label}已保存${rating ? ` · ${rating}.0 分` : ''}，媒体附件 ${state.communityFiles.length} 个`);
+  state.communityComposer = null;
+  state.communityFiles = [];
+  paint();
 }
 
 let discoverTimer = null;

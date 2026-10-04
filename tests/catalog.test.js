@@ -109,6 +109,15 @@ test('repo: charts honour genre filters', () => {
   assert.strictEqual(kpop.length, 1);
 });
 
+test('repo: releases only expose core Hip-Hop/K-Pop culture and stay chronological', () => {
+  const releases = repo.listReleases({ limit: 10 });
+  assert.ok(releases.length >= 2);
+  assert.ok(releases.every((album) => /rap|hip-hop|k-pop|kpop/i.test(album.genre || '')));
+  for (let i = 1; i < releases.length; i += 1) {
+    assert.ok(String(releases[i - 1].releaseDate || '') >= String(releases[i].releaseDate || ''));
+  }
+});
+
 test('search: local-first returns grouped results without providers', async () => {
   const result = await search.search('aespa');
   assert.strictEqual(result.artists.length, 1);
@@ -140,6 +149,19 @@ test('api: /api/search groups artists, albums and tracks', async () => {
   assert.strictEqual(body.results.artists.length, 1);
   assert.strictEqual(body.results.albums.length, 1);
   assert.strictEqual(body.results.tracks.length, 3);
+  assert.ok(body.results.tracks[0].coverUrl, 'search tracks expose album artwork route');
+  assert.ok(body.results.tracks[0].artistId, 'search tracks expose related artist id');
+});
+
+test('api: chart genre tabs return real classified results', async () => {
+  const rap = await call('GET', '/api/charts?genre=hiphop&limit=10');
+  const rapBody = rap.json();
+  assert.ok(rapBody.items.length > 0);
+  assert.ok(rapBody.items.every((item) => /rap|hip-hop/i.test(item.genre || '')));
+  const kpop = await call('GET', '/api/charts?genre=kpop&limit=10');
+  const kpopBody = kpop.json();
+  assert.ok(kpopBody.items.length > 0);
+  assert.ok(kpopBody.items.every((item) => /k-pop|kpop/i.test(item.genre || '')));
 });
 
 test('api: missing resources return 404', async () => {

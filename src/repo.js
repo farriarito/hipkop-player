@@ -316,13 +316,18 @@ const ALBUM_COLUMNS = `al.id, al.provider, al.provider_album_id AS providerId, a
   (SELECT ar.id FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
      WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistId,
   (SELECT ar.name FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
-     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistName`;
+     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistName,
+  (SELECT ar.region FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistRegion`;
 
 const TRACK_COLUMNS = `t.id, t.provider, t.provider_track_id AS providerId, t.title,
   t.album_id AS albumId, t.artist_display AS artistDisplay, t.track_number AS trackNumber,
   t.disc_number AS discNumber, t.duration_ms AS durationMs, t.preview_url AS previewUrl,
   t.release_date AS releaseDate, t.genre, t.popularity, t.synced_at AS syncedAt,
-  t.sync_status AS syncStatus, t.sync_error AS syncError`;
+  t.sync_status AS syncStatus, t.sync_error AS syncError,
+  (SELECT ar.id FROM track_artists ta JOIN artists ar ON ar.id = ta.artist_id
+     WHERE ta.track_id = t.id ORDER BY ta.position, ar.name LIMIT 1) AS primaryArtistId,
+  (SELECT al.title FROM albums al WHERE al.id = t.album_id LIMIT 1) AS albumTitle`;
 
 const getArtistRow = (id) => get(`SELECT ${ARTIST_COLUMNS} FROM artists WHERE id = ?`, [id]);
 const getAlbumRow = (id) => get(`SELECT ${ALBUM_COLUMNS} FROM albums al WHERE al.id = ?`, [id]);
@@ -421,13 +426,51 @@ function searchLocal(query, { limit = 20 } = {}) {
 }
 
 const GENRE_FILTERS = {
-  rap: `(al.genre LIKE '%rap%' OR al.genre LIKE '%hip-hop%' OR al.genre LIKE '%hip hop%')`,
-  kpop: `(al.genre LIKE '%k-pop%' OR al.genre LIKE '%kpop%')`,
-  hiphop: `(al.genre LIKE '%rap%' OR al.genre LIKE '%hip-hop%')`
+  core: `(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%k-pop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%kpop%')`,
+  rap: `(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%')`,
+  kpop: `(LOWER(COALESCE(al.genre, '')) LIKE '%k-pop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%kpop%')`,
+  hiphop: `(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%')`
 };
 
+const cultureBucket = (row) => {
+  const genre = String(row.genre || '').toLowerCase();
+  if (/k.?pop|korean/.test(genre)) return 'kpop';
+  const identity = `${row.primaryArtistName || ''} ${row.artistDisplay || ''} ${row.primaryArtistRegion || ''}`;
+  return /[\u4e00-\u9fff]|china|中国|taiwan|台湾|hong kong|香港|mandarin/i.test(identity)
+    ? 'rap-cn'
+    : 'rap-global';
+};
+
+function balancedChartRows(rows, limit) {
+  const groups = { 'rap-cn': [], 'rap-global': [], kpop: [] };
+  for (const row of rows) {
+    const bucket = cultureBucket(row);
+    if (groups[bucket]) groups[bucket].push(row);
+  }
+  const active = Object.keys(groups).filter((key) => groups[key].length);
+  if (active.length <= 1) return rows.slice(0, limit);
+  const ordered = [];
+  const order = ['rap-cn', 'rap-global', 'kpop'];
+  // Keep the globally highest-ranked item first, then rotate through the
+  // remaining culture buckets. This preserves chart credibility while
+  // preventing the rest of the page from becoming a single-genre feed.
+  if (rows[0]) {
+    ordered.push(rows[0]);
+    const firstBucket = cultureBucket(rows[0]);
+    const firstIndex = groups[firstBucket].findIndex((row) => row.id === rows[0].id);
+    if (firstIndex >= 0) groups[firstBucket].splice(firstIndex, 1);
+  }
+  let cursor = (order.indexOf(cultureBucket(rows[0] || {})) + 1 + order.length) % order.length;
+  while (ordered.length < limit && order.some((key) => groups[key].length)) {
+    const key = order[cursor % order.length];
+    if (groups[key].length) ordered.push(groups[key].shift());
+    cursor += 1;
+  }
+  return ordered;
+}
+
 function listReleases({ from = null, to = null, limit = 30 } = {}) {
-  const clauses = [];
+  const clauses = [GENRE_FILTERS.core];
   const params = [];
   if (from) { clauses.push('al.release_date >= ?'); params.push(from); }
   if (to) { clauses.push('al.release_date <= ?'); params.push(to); }
@@ -442,19 +485,19 @@ function listReleases({ from = null, to = null, limit = 30 } = {}) {
 
 function listCharts({ genre = 'all', sort = 'popularity', limit = 50 } = {}) {
   const params = [];
-  let where = '';
-  const filter = GENRE_FILTERS[genre];
-  if (filter) {
-    where = `WHERE ${filter}`;
-  }
+  const filter = GENRE_FILTERS[genre] || GENRE_FILTERS.core;
+  const where = `WHERE ${filter}`;
   const order =
     sort === 'score'
       ? 'al.score DESC, al.release_date DESC'
       : sort === 'date'
         ? 'al.release_date DESC NULLS LAST'
         : 'COALESCE(al.popularity, -1) DESC, al.score DESC, al.release_date DESC';
-  params.push(limit);
-  return all(`SELECT ${ALBUM_COLUMNS} FROM albums al ${where} ORDER BY ${order} LIMIT ?`, params);
+  // Fetch a wider candidate pool before balancing so a single provider or
+  // language cannot occupy every slot in the all/Hip-Hop charts.
+  params.push(Math.max(limit * 4, 120));
+  const rows = all(`SELECT ${ALBUM_COLUMNS} FROM albums al ${where} ORDER BY ${order} LIMIT ?`, params);
+  return sort === 'date' ? rows.slice(0, limit) : balancedChartRows(rows, limit);
 }
 
 const staleArtists = (sinceIso, limit = 25) =>
