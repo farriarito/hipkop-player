@@ -106,10 +106,15 @@ function artistResult(artist) {
 const loading = (text = '正在加载…') => `<section class="section"><div class="discover-hint">${esc(text)}</div></section>`;
 const emptyState = (text) => `<p class="empty">${esc(text)}</p>`;
 
+function isCoreCulture(item) {
+  const genre = String(item?.genre || '').toLowerCase();
+  return /hip.?hop|rap|k.?pop|korean pop/.test(genre);
+}
+
 /* --------------------------------- pages ---------------------------------- */
 
 function heroSection() {
-  return `<section class="hero"><div><div class="eyebrow">HIPKOP PLAYER · 2026</div><h1>听见 HipHop 的另一面。</h1><p>专辑、乐评、榜单与社区。一个同时面向 Rap 与 K-POP 听众的竖屏音乐体验。</p><button class="cta" onclick="navigate('charts')">探索本季榜单　→</button></div><div class="hero-art"><span>RAP<br>×<br>K-POP</span></div></section>`;
+  return `<section class="hero"><div class="hero-copy"><div class="hero-kicker"><span class="pulse"></span> HIPKOP / CULTURE FEED · 2026</div><h1>下一首，<em>必须有态度。</em></h1><p>全球 Hip-Hop、Rap 与 K-POP 的新作、榜单和现场讨论。给今天的耳朵，一点不一样。</p><div class="hero-meta"><span>GLOBAL RAP</span><span>K-POP</span><span>COMMUNITY</span></div><div class="hero-actions"><button class="cta" onclick="navigate('discover')">开始探索 <b>↗</b></button><button class="ghost-cta" onclick="navigate('charts')">看本周榜单</button></div></div><div class="hero-art"><div class="hero-art-grid"></div><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-sticker sticker-top">TURN<br>IT<br>UP</div><div class="hero-sticker sticker-bottom">H / K<br><small>NO SKIPS</small></div><span class="hero-art-word">HYPE<br>MODE</span><span class="hero-index">001 / 026</span></div></section>`;
 }
 
 function pickView() {
@@ -124,9 +129,15 @@ function offlineNotice() {
 
 async function viewHome() {
   const data = await safeApi('/api/releases?limit=12', null);
-  state.releases = (data && data.items && data.items.length ? data.items : FALLBACK_ALBUMS);
+  const remoteReleases = data && Array.isArray(data.items) ? data.items : [];
+  const cultureReleases = remoteReleases.filter(isCoreCulture);
+  state.releases = (cultureReleases.length ? cultureReleases : remoteReleases).slice(0, 16);
+  if (!state.releases.length) state.releases = FALLBACK_ALBUMS;
   const chartsData = await safeApi('/api/charts?limit=6', null);
-  state.charts = chartsData && chartsData.items && chartsData.items.length ? chartsData.items : FALLBACK_ALBUMS.slice(0, 5);
+  const remoteCharts = chartsData && Array.isArray(chartsData.items) ? chartsData.items : [];
+  const cultureCharts = remoteCharts.filter(isCoreCulture);
+  state.charts = (cultureCharts.length ? cultureCharts : remoteCharts).slice(0, 8);
+  if (!state.charts.length) state.charts = FALLBACK_ALBUMS.slice(0, 5);
   state.pick = null;
 
   const latest = state.releases;
