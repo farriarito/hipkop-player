@@ -1,8 +1,19 @@
 {
-  "name":"hipkop-player",
-  "version":"0.1.0",
-  "private":true,
-  "description":"HIPKOP PLAYER — Rap + K-POP 竖屏音乐体验",
-  "scripts":{"start":"node server.js","dev":"node server.js"},
-  "type":"commonjs"
+  "name": "hipkop-player",
+  "version": "0.3.0",
+  "private": true,
+  "description": "HIPKOP PLAYER — Rap + K-POP 竖屏音乐体验（SQLite 目录 + 元数据 Provider）",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "sync": "node scripts/sync-once.js",
+    "check": "node --check server.js && node --check public/app.js",
+    "test": "node --test"
+  },
+  "type": "commonjs",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {}
 }

@@ -1,3 +1,35 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f7f1e4"><title>HIPKOP PLAYER · Rap + K-POP 音乐体验</title><link rel="stylesheet" href="/style.css"></head><body><div class="app"><header class="top"><div class="brand" onclick="navigate('home')"><span class="mark">H</span><span>HIPKOP</span></div><div class="top-actions"><button class="search-toggle" onclick="toggleSearch()">⌕ <span>搜索专辑、艺人或组合</span></button><button class="login" onclick="toast('本地演示模式：登录功能已禁用')">登录</button></div></header><div id="searchbar" class="searchbar hidden"><input id="searchInput" placeholder="搜索 Rap、K-POP 专辑、艺人或组合…" oninput="search()"><button onclick="toggleSearch()">关闭</button></div><main id="view"></main><nav class="tabbar"><button data-tab="home" onclick="navigate('home')"><img class="nav-icon" src="/assets/icons/nav/home.svg" alt="">首页</button><button data-tab="charts" onclick="navigate('charts')"><img class="nav-icon" src="/assets/icons/nav/charts.svg" alt="">榜单</button><button data-tab="discover" onclick="navigate('discover')"><img class="nav-icon" src="/assets/icons/nav/compass.svg" alt="">发现</button><button data-tab="community" onclick="navigate('community')"><img class="nav-icon" src="/assets/icons/nav/features.svg" alt="">社区</button><button data-tab="profile" onclick="navigate('profile')"><img class="nav-icon" src="/assets/icons/nav/user.svg" alt="">我的</button></nav><div id="toast"></div></div><script src="/app.js"></script></body></html>
-
-
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f7f1e4">
+  <title>HIPKOP PLAYER · Rap + K-POP 音乐体验</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand" onclick="navigate('home')"><span class="mark">H</span><span>HIPKOP</span></div>
+      <div class="top-actions">
+        <button class="search-toggle" onclick="toggleSearch()">⌕ <span>搜索专辑、艺人或组合</span></button>
+        <button class="login" onclick="toast('本地演示模式：登录功能已禁用')">登录</button>
+      </div>
+    </header>
+    <div id="searchbar" class="searchbar hidden">
+      <input id="searchInput" placeholder="搜索 Rap、K-POP 专辑、艺人或组合…" oninput="search()">
+      <button onclick="toggleSearch()">关闭</button>
+    </div>
+    <main id="view"></main>
+    <nav class="tabbar">
+      <button data-tab="home" onclick="navigate('home')"><img class="nav-icon" src="/assets/icons/nav/home.svg" alt="">首页</button>
+      <button data-tab="charts" onclick="navigate('charts')"><img class="nav-icon" src="/assets/icons/nav/charts.svg" alt="">榜单</button>
+      <button data-tab="discover" onclick="navigate('discover')"><img class="nav-icon" src="/assets/icons/nav/compass.svg" alt="">发现</button>
+      <button data-tab="community" onclick="navigate('community')"><img class="nav-icon" src="/assets/icons/nav/features.svg" alt="">社区</button>
+      <button data-tab="profile" onclick="navigate('profile')"><img class="nav-icon" src="/assets/icons/nav/user.svg" alt="">我的</button>
+    </nav>
+    <div id="toast"></div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

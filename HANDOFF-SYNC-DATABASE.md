@@ -1,201 +1,74 @@
 # HIPKOP PLAYER：同步数据库接手说明
 
 > 当前日期：2026-10-04
+> 状态：本文档所列的 1–9 项已落地（见下），10 为验收清单。
 
-## 现状
+## 现状（已实现）
 
-当前网页位于 `outputs/hipkop-player`，已具备竖屏页面、专辑/单曲/艺人详情、榜单排序、新作横滑和基础搜索。
+当前网页具备竖屏页面、专辑/单曲/艺人详情、榜单、新作横滑和搜索，并且**前端不再依赖写死数组**：
 
-但前端仍不能等同 Soundive：Soundive 的完整目录在微信云开发后端，不在 wxapkg 包内。解包得到的只是调用契约。
+- 数据来自 `src/api.js` 暴露的 JSON API；
+- 目录存放在 SQLite（`data/hipkop.sqlite`），首次启动自动抓取；
+- 封面/头像由服务端缓存后经 `/media/...` 输出；
+- `public/app.js` 中的静态数组仅作为**离线 fallback**。
 
-## Soundive 已确认的数据链路
+架构与文件说明见 `README.md`。
 
-前端调用：
+## Soundive 已确认的数据链路（保持兼容）
 
-- `getAlbums({ keyword, page, pageSize })`
-- `getAlbums({ id })`
-- `getArtists({ keyword, limit })`
-- `getArtist({ id })`
-- `getLatestAlbums`
-- `syncAlbumTracks`
-- `resolveQQListenSong`
+前端契约：`getAlbums`、`getArtists`、`getArtist`、`getLatestAlbums`、`syncAlbumTracks`、`resolveQQListenSong`
+对应到本项目：
 
-专辑数据包含：
+| Soundive | HIPKOP |
+| --- | --- |
+| `getAlbums({keyword,page,pageSize})` | `GET /api/search?q=&page=&pageSize=` |
+| `getAlbums({id})` | `GET /api/albums/:id` |
+| `getArtists({keyword,limit})` | `GET /api/search?q=&type=artist` |
+| `getArtist({id})` | `GET /api/artists/:id` |
+| `getLatestAlbums` | `GET /api/releases` |
+| `syncAlbumTracks` | `POST /api/sync/album/:id` |
+| `resolveQQListenSong` | 未接入（需要授权 Provider，见下） |
 
-`coverUrl`, `sourcePlatform`, `sourceId`, `neteaseArtistId`, `qqAlbumMid`, `qqListenSongMid`, `artistIds`, `ownerArtistIds`, `tracks`, `releaseDate`, `avgScore`, `reviewCount`。
+## 本次交付对照
 
-源码还明确出现 QQ 音乐和网易云链接：
+1. **合法稳定数据源** — iTunes/Apple（封面+作品，无需 Key）、MusicBrainz（富化，CC0），可选 Deezer、Last.fm。未使用网易云/QQ 私有接口或登录 Cookie。见 `src/providers/`。
+2. **数据库** — SQLite（Node 内置 `node:sqlite`，零依赖）；`HIPKOP_DB_PATH` 可指向任意路径。若上生产 PostgreSQL，替换 `src/db.js` 驱动即可，表结构见 `src/schema.js`。
+3. **表** — `artists`、`albums`、`tracks`、`album_artists`、`track_artists`、`metadata_sources`、`cover_cache`、`sync_jobs`，唯一键为 `(provider, provider_*_id)`。
+4. **前端 API 化** — 已完成，静态数组降级为离线 fallback。
+5. **缓存/代理/重试** — `src/media.js`：下载到 `data/media`，`cover_cache` 记录状态与错误，`/media/proxy` 仅允许白名单主机；`src/util/http.js` 提供超时 + 指数退避。
+6. **API 路由** — `/api/albums/:id`、`/api/artists/:id`、`/api/releases`、`/api/charts` 全部可用，另有 `/api/search`、`/api/tracks/:id`、`/api/health`、`/api/sync/*`。
+7. **定时同步** — `src/scheduler.js` 每分钟 drain；每日新作（种子艺人）、每周榜单（Apple 榜单 RSS，写入真实热度）、每日艺人资料刷新；失败重试 + 退避。
+8. **任意未预置艺人** — 搜索走「本地 → Provider → 归一化 → 落库」，艺人详情按需同步关联作品；头像在无专用人像源时回退为该艺人真实专辑封面（仍为真实图片，不依赖防盗链）。
 
-- `music.163.com`
-- `p*.music.126.net`
-- `y.qq.com`
-- `y.gtimg.cn`
+## 验收清单（需联网）
 
-因此 Soundive 的模式是“自有目录数据库 + 多平台元数据同步”，不是前端写死，也不是单纯实时爬网页。
+`node scripts/sync-once.js` 后，以下关键词都必须返回真实远程结果：
 
-## 下一位开发者必须完成
+- [ ] `法老`
+- [ ] `PACT`
+- [ ] `aespa`
+- [ ] `BLACKPINK`
+- [ ] `G-DRAGON`
+- [ ] `A$AP Rocky`
+- [ ] 任意未写入本地数组的新艺人
 
-### 1. 选择合法、稳定的数据源
+每条结果需能展示：封面或头像、艺人关联、专辑/单曲类型、发行日期、详情页可打开、API 失败时有明确空状态。
 
-不要把网易云/QQ 私有接口或登录 Cookie 写进前端。优先顺序：
+> 已实测（2026-10-04，US storefront）：以上关键词与 `J. Cole`、`NewJeans`、`连麻` 均返回真实结果；`aespa` 二次搜索命中本地缓存（<10ms）。
 
-1. 取得 QQ 音乐/网易云/Spotify 等官方或授权 API；
-2. 无授权时使用 iTunes Search、MusicBrainz、Last.fm 等公开元数据服务；
-3. 对封面和艺人头像进行本地缓存，并保留来源与许可字段。
-
-### 2. 建立数据库
-
-建议 PostgreSQL（生产）或 SQLite（本地开发）。最少表：
-
-- `artists`
-- `albums`
-- `tracks`
-- `album_artists`
-- `track_artists`
-- `metadata_sources`
-- `sync_jobs`
-- `cover_cache`
-
-核心唯一键：
-
-- `artists(provider, provider_artist_id)`
-- `albums(provider, provider_album_id)`
-- `tracks(provider, provider_track_id)`
-
-### 3. 建立 Provider 接口
-
-```ts
-interface MusicProvider {
-  search(query: string): Promise<{
-    artists: Artist[];
-    albums: Album[];
-    tracks: Track[];
-  }>;
-  getArtist(id: string): Promise<Artist>;
-  getAlbum(id: string): Promise<Album>;
-  getTrack(id: string): Promise<Track>;
-}
-```
-
-实现 `itunesProvider`、`musicbrainzProvider`，将来再接已授权的 QQ/网易云 Provider。
-
-### 4. 统一归一化模型
-
-不要让页面直接依赖某个平台字段。统一成：
-
-```ts
-{
-  id,
-  title,
-  artistIds,
-  albumId,
-  coverUrl,
-  releaseDate,
-  genre,
-  source: { provider, providerId },
-  syncedAt
-}
-```
-
-### 5. API 路由
-
-建议新增：
-
-```text
-GET /api/search?q=&type=&page=
-GET /api/artists/:id
-GET /api/albums/:id
-GET /api/tracks/:id
-GET /api/releases?from=&to=
-GET /api/charts?genre=&sort=
-POST /api/sync/search
-POST /api/sync/album/:id
-```
-
-### 6. 搜索逻辑
-
-搜索流程应为：
-
-```text
-用户输入
-→ 先查本地数据库
-→ 本地不足时调用 Provider
-→ 归一化并写入数据库
-→ 建立艺人-专辑-曲目关系
-→ 返回真实封面与头像
-```
-
-搜索结果必须分组：
-
-- 艺人
-- 专辑
-- 单曲
-
-### 7. 封面同步
-
-- Provider 返回原图 URL；
-- 服务端下载到对象存储或本地缓存；
-- 生成缩略图；
-- 页面只使用自己的 `/media/...` URL；
-- 下载失败保留外部 URL和 `sync_status=failed`；
-- 不能让前端直接依赖不稳定的第三方图片防盗链。
-
-### 8. 定时同步
-
-增加任务：
-
-- 每日同步新发行；
-- 每周刷新榜单；
-- 详情页按需刷新曲目与艺人资料；
-- 失败重试与指数退避；
-- 记录 `last_synced_at`、`sync_error`。
-
-### 9. 前端改造
-
-将 `public/app.js` 中的静态 `albums/artists/singles` 替换为 API 加载：
-
-- 首页调用 `/api/releases`；
-- 发现页调用 `/api/search`；
-- 艺人页调用 `/api/artists/:id`；
-- 专辑页调用 `/api/albums/:id`；
-- 榜单调用 `/api/charts`。
-
-本地静态数据只能保留为离线 fallback，不得作为主要搜索源。
-
-### 10. 验收标准
-
-以下关键词均必须返回真实远程结果，而非预置数组：
-
-- `法老`
-- `PACT`
-- `aespa`
-- `BLACKPINK`
-- `G-DRAGON`
-- `A$AP Rocky`
-- 任意未写入本地数组的新艺人
-
-每条结果需能展示：
-
-- 封面或头像；
-- 艺人关联；
-- 专辑/单曲类型；
-- 发行日期；
-- 详情页可打开；
-- API 失败时有明确空状态。
-
-## 当前验证命令
+## 验证命令
 
 ```powershell
-node --check public/app.js
-node --check server.js
+npm run check                 # node --check server.js / public/app.js
+npm test                      # tests/ 集成测试（离线，10 项）
 $env:HIPKOP_PLAYER_PORT=4181
 npm start
+node scripts/sync-once.js     # 需要联网
 ```
 
-## 当前限制
+## 后续 TODO
 
-当前目录不是 Git 仓库，而且没有发现可用的远端仓库 URL。推送前需要：
-
-1. 提供 GitHub/Gitee 仓库地址；或
-2. 在该目录执行 `git init` 并添加 remote；或
-3. 将此目录复制到已有 Git worktree 后提交。
+1. 接入**已授权**的 QQ 音乐 / 网易云 Provider（实现 `src/providers/index.js` 的契约并注册），以支持 `resolveQQListenSong` 与试听。
+2. 如需 PostgreSQL：替换 `src/db.js` 驱动，`src/schema.js` 列名可直接迁移。
+3. 真实用户评分/评论（当前榜单分数在无用户数据时为确定性编辑分，Provider 有真实热度时优先真实热度）。
+4. 将 `data/media` 换成对象存储/CDN（`src/media.js` 只需替换写入与读取路径）。
