@@ -112,6 +112,24 @@ function tagLine(item) {
   return [item.genre, bucketLabel(item.genreBucket), sceneLabel(item.scene)].filter(Boolean);
 }
 
+// Chart "heat": prefer a real provider heat value, otherwise fall back to a
+// stable editorial blend so no row ever renders an empty metric.
+function heatValue(item) {
+  const explicit = Number(item && (item.searchHeat ?? item.heat ?? item.popularity));
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const comments = Number(item && item.comments) || 0;
+  const score = Number(item && item.score) || 0;
+  const date = item && item.releaseDate ? new Date(item.releaseDate).getTime() : 0;
+  const freshness = date ? Math.max(0, (date - Date.now() + 1000 * 86400 * 365) / (1000 * 86400 * 365)) : 0;
+  return comments * 1.4 + score * 42 + freshness * 10;
+}
+
+function heatPercent(item, collection = state.charts) {
+  const values = (collection || []).map(heatValue);
+  const max = Math.max(1, ...values);
+  return Math.max(1, Math.min(99, Math.round((heatValue(item) / max) * 100)));
+}
+
 /* ------------------------------ data layer -------------------------------- */
 
 async function api(path) {
@@ -300,7 +318,14 @@ async function loadCharts() {
 function chartsList() {
   if (!state.charts.length) return emptyState('暂无榜单数据。首次同步完成后将显示真实榜单。');
   return `<div class="rank-list">${state.charts
-    .map((album, index) => `<div class="rank" onclick="openItem('${esc(album.id)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}${album.year ? ' · ' + esc(album.year) : ''}</div></div><span class="score">${album.score != null ? Number(album.score).toFixed(1) : '—'}</span></div>`)
+    .map((album, index) => {
+      const metric = state.chartSort === 'date'
+        ? esc(album.releaseDate || yearOf(album) || '—')
+        : state.chartSort === 'popularity'
+          ? `🔥 ${heatPercent(album)}%`
+          : album.score != null ? Number(album.score).toFixed(1) : '—';
+      return `<div class="rank" onclick="openItem('${esc(album.id)}')"><span class="rank-no">${String(index + 1).padStart(2, '0')}</span><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}${album.year ? ' · ' + esc(album.year) : ''}</div></div><span class="score">${metric}</span></div>`;
+    })
     .join('')}</div>`;
 }
 
@@ -627,21 +652,6 @@ function toast(message) {
   setTimeout(() => element.classList.remove('show'), 2200);
 }
 
-function toggleSearch() {
-  const bar = $('#searchbar');
-  bar.classList.toggle('hidden');
-  if (!bar.classList.contains('hidden')) $('#searchInput').focus();
-}
-
-function search() {
-  const query = ($('#searchInput').value || '').trim();
-  if (!query) return;
-  navigate('discover').then(() => {
-    const input = $('#discoverInput');
-    if (input) input.value = query;
-    runDiscover(query);
-  });
-}
 
 let discoverTimer = null;
 function onDiscoverInput() {

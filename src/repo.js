@@ -433,14 +433,19 @@ const ALBUM_COLUMNS = `al.id, al.provider, al.provider_album_id AS providerId, a
   (SELECT ar.id FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
      WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistId,
   (SELECT ar.name FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
-     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistName`;
+     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistName,
+  (SELECT ar.region FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+     WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistRegion`;
 
 const TRACK_COLUMNS = `t.id, t.provider, t.provider_track_id AS providerId, t.title,
   t.album_id AS albumId, t.artist_display AS artistDisplay, t.track_number AS trackNumber,
   t.disc_number AS discNumber, t.duration_ms AS durationMs, t.preview_url AS previewUrl,
   t.release_date AS releaseDate, t.genre, t.genre_bucket AS genreBucket, t.popularity,
   t.qq_song_mid AS qqSongMid, t.netease_song_id AS neteaseSongId,
-  t.synced_at AS syncedAt, t.sync_status AS syncStatus, t.sync_error AS syncError`;
+  t.synced_at AS syncedAt, t.sync_status AS syncStatus, t.sync_error AS syncError,
+  (SELECT ar.id FROM track_artists ta JOIN artists ar ON ar.id = ta.artist_id
+     WHERE ta.track_id = t.id ORDER BY ta.position, ar.name LIMIT 1) AS primaryArtistId,
+  (SELECT al.title FROM albums al WHERE al.id = t.album_id LIMIT 1) AS albumTitle`;
 
 const getArtistRow = (id) => get(`SELECT ${ARTIST_COLUMNS} FROM artists WHERE id = ?`, [id]);
 const getAlbumRow = (id) => get(`SELECT ${ALBUM_COLUMNS} FROM albums al WHERE al.id = ?`, [id]);
@@ -551,10 +556,13 @@ const BUCKET_FILTERS = {
 
 const SCENE_FILTERS = { mainstream: `al.scene = 'mainstream'`, underground: `al.scene = 'underground'` };
 
-function albumWhere({ bucket, scene, genre, from, to, year } = {}) {
+function albumWhere({ bucket, scene, genre, from, to, year, core = false } = {}) {
   const clauses = [];
   const params = [];
   if (BUCKET_FILTERS[bucket]) clauses.push(BUCKET_FILTERS[bucket]);
+  // The "all" chart stays on core culture (HipHop + K-POP); an explicit bucket
+  // opt-in still reaches the rest of the catalogue.
+  if (core && !BUCKET_FILTERS[bucket]) clauses.push(GENRE_FILTERS.core);
   if (SCENE_FILTERS[scene]) clauses.push(SCENE_FILTERS[scene]);
   if (genre && !BUCKET_FILTERS[genre]) {
     clauses.push(`(al.genre LIKE ? ESCAPE '\\' OR al.genre LIKE ? ESCAPE '\\')`);
@@ -573,8 +581,8 @@ const ORDER_BY = {
   title: 'al.title ASC'
 };
 
-function listAlbumsBrowse({ bucket, scene, genre, from, to, year, sort = 'date', limit = 40 } = {}) {
-  const { where, params } = albumWhere({ bucket, scene, genre, from, to, year });
+function listAlbumsBrowse({ bucket, scene, genre, from, to, year, sort = 'date', limit = 40, core = false } = {}) {
+  const { where, params } = albumWhere({ bucket, scene, genre, from, to, year, core });
   params.push(limit);
   return all(
     `SELECT ${ALBUM_COLUMNS} FROM albums al ${where} ORDER BY ${ORDER_BY[sort] || ORDER_BY.date} LIMIT ?`,
@@ -582,16 +590,77 @@ function listAlbumsBrowse({ bucket, scene, genre, from, to, year, sort = 'date',
   );
 }
 
-const listReleases = ({ from = null, to = null, bucket = null, scene = null, limit = 30 } = {}) =>
-  listAlbumsBrowse({ from, to, bucket, scene, sort: 'date', limit });
+// The product is HipHop + K-POP, so the default rails stay on "core culture"
+// genres and the default charts are balanced so no single language/provider can
+// fill every slot.
+const GENRE_FILTERS = {
+  core: "(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%k-pop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%kpop%')",
+  rap: "(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%')",
+  kpop: "(LOWER(COALESCE(al.genre, '')) LIKE '%k-pop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%kpop%')",
+  hiphop: "(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%')"
+};
 
-const listCharts = ({ genre = 'all', scene = 'all', sort = 'popularity', limit = 50 } = {}) =>
-  listAlbumsBrowse({
+const cultureBucket = (row) => {
+  const genre = String(row.genre || '').toLowerCase();
+  if (/k.?pop|korean/.test(genre)) return 'kpop';
+  const identity = `${row.primaryArtistName || ''} ${row.artistDisplay || ''} ${row.primaryArtistRegion || ''}`;
+  return /[\u4e00-\u9fff]|china|中国|taiwan|台湾|hong kong|香港|mandarin/i.test(identity) ? 'rap-cn' : 'rap-global';
+};
+
+// Keep the globally highest-ranked item first, then rotate through the culture
+// buckets so one chart shows mainstream, underground and K-POP side by side.
+function balancedChartRows(rows, limit) {
+  const groups = { 'rap-cn': [], 'rap-global': [], kpop: [] };
+  for (const row of rows) {
+    const bucket = cultureBucket(row);
+    if (groups[bucket]) groups[bucket].push(row);
+  }
+  const order = ['rap-cn', 'rap-global', 'kpop'];
+  if (order.filter((key) => groups[key].length).length <= 1) return rows.slice(0, limit);
+  const ordered = [];
+  if (rows[0]) {
+    ordered.push(rows[0]);
+    const first = groups[cultureBucket(rows[0])];
+    const index = first.findIndex((row) => row.id === rows[0].id);
+    if (index >= 0) first.splice(index, 1);
+  }
+  let cursor = (order.indexOf(cultureBucket(rows[0] || {})) + 1 + order.length) % order.length;
+  while (ordered.length < limit && order.some((key) => groups[key].length)) {
+    const key = order[cursor % order.length];
+    if (groups[key].length) ordered.push(groups[key].shift());
+    cursor += 1;
+  }
+  return ordered;
+}
+
+function listReleases({ from = null, to = null, bucket = null, scene = null, core = true, limit = 30 } = {}) {
+  // Home "新作" defaults to core culture; an explicit bucket/scene (discover)
+  // still reaches the full catalogue.
+  if (core && !bucket && !scene) {
+    const params = [];
+    const clauses = [GENRE_FILTERS.core];
+    if (from) { clauses.push('al.release_date >= ?'); params.push(from); }
+    if (to) { clauses.push('al.release_date <= ?'); params.push(to); }
+    params.push(limit);
+    return all(
+      `SELECT ${ALBUM_COLUMNS} FROM albums al WHERE ${clauses.join(' AND ')}
+       ORDER BY al.release_date DESC NULLS LAST, al.score DESC LIMIT ?`,
+      params
+    );
+  }
+  return listAlbumsBrowse({ from, to, bucket, scene, sort: 'date', limit });
+}
+
+function listCharts({ genre = 'all', scene = 'all', sort = 'popularity', limit = 50 } = {}) {
+  const rows = listAlbumsBrowse({
     bucket: genre === 'all' ? null : genre,
     scene: scene === 'all' ? null : scene,
     sort,
-    limit
+    core: genre === 'all',
+    limit: sort === 'date' ? limit : Math.max(limit * 4, 120)
   });
+  return sort === 'date' ? rows : balancedChartRows(rows, limit);
+}
 
 const staleArtists = (sinceIso, limit = 25) =>
   all(
