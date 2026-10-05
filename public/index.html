@@ -2,31 +2,35 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0b10">
   <meta name="description" content="HIPKOP PLAYER：全球 Hip-Hop、Rap 与 K-POP 的新作、榜单、评分与社区。">
   <title>HIPKOP PLAYER · CULTURE FEED</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#view">跳到主内容</a>
   <div class="app">
     <header class="top">
-      <div class="brand" onclick="navigate('home')"><span class="mark">H</span><span>HIPKOP</span></div>
+      <div class="brand" role="button" tabindex="0" aria-label="HIPKOP 首页" onclick="navigate('home')" onkeydown="activateKey(event)"><span class="mark" aria-hidden="true">H</span><span>HIPKOP</span></div>
       <div class="top-actions">
-        <button class="discover-link" onclick="navigate('discover')">发现</button>
-        <button class="login" onclick="toast('本地演示模式：登录功能已禁用')">登录</button>
+        <button class="discover-link" type="button" onclick="navigate('discover')">发现</button>
+        <button class="login" type="button" onclick="toast('本地演示模式：登录功能已禁用')">登录</button>
       </div>
     </header>
-    <main id="view"></main>
-    <nav class="tabbar">
-      <button data-tab="home" onclick="navigate('home')"><img class="nav-icon" src="/assets/icons/nav/home.svg" alt="">首页</button>
-      <button data-tab="charts" onclick="navigate('charts')"><img class="nav-icon" src="/assets/icons/nav/charts.svg" alt="">榜单</button>
-      <button data-tab="discover" onclick="navigate('discover')"><img class="nav-icon" src="/assets/icons/nav/compass.svg" alt="">发现</button>
-      <button data-tab="community" onclick="navigate('community')"><img class="nav-icon" src="/assets/icons/nav/features.svg" alt="">社区</button>
-      <button data-tab="profile" onclick="navigate('profile')"><img class="nav-icon" src="/assets/icons/nav/user.svg" alt="">我的</button>
+    <main id="view" tabindex="-1"></main>
+    <nav class="tabbar" aria-label="主导航">
+      <button type="button" data-tab="home" onclick="navigate('home')"><img class="nav-icon" src="/assets/icons/nav/home.svg" alt="" aria-hidden="true">首页</button>
+      <button type="button" data-tab="charts" onclick="navigate('charts')"><img class="nav-icon" src="/assets/icons/nav/charts.svg" alt="" aria-hidden="true">榜单</button>
+      <button type="button" data-tab="discover" onclick="navigate('discover')"><img class="nav-icon" src="/assets/icons/nav/compass.svg" alt="" aria-hidden="true">发现</button>
+      <button type="button" data-tab="community" onclick="navigate('community')"><img class="nav-icon" src="/assets/icons/nav/features.svg" alt="" aria-hidden="true">社区</button>
+      <button type="button" data-tab="profile" onclick="navigate('profile')"><img class="nav-icon" src="/assets/icons/nav/user.svg" alt="" aria-hidden="true">我的</button>
     </nav>
-    <div id="sheet" class="sheet hidden" onclick="closeSheet()"><div class="sheet-card" id="sheetCard" onclick="event.stopPropagation()"></div></div>
-    <div id="toast"></div>
+    <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-label="详情面板" aria-hidden="true" onclick="closeSheet()"><div class="sheet-card" id="sheetCard" onclick="event.stopPropagation()"></div></div>
+    <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <noscript><p class="discover-hint" style="padding:16px">HIPKOP 需要 JavaScript 才能加载目录与社区内容。</p></noscript>
   </div>
   <script src="/app.js"></script>
 </body>
