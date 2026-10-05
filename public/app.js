@@ -13,19 +13,19 @@
 /* ------------------------------- fallback -------------------------------- */
 
 const FALLBACK_ALBUMS = [
-  { id: 'fallback-1', kind: 'album', title: 'MUSE', artist: 'aespa', artistId: 'fallback-aespa', genre: 'K-POP', genreBucket: 'kpop', scene: 'mainstream', year: '2026', releaseDate: '2026-09-21', score: 9.4, comments: 428, desc: '未来感、强节拍与极具辨识度的世界观。', coverUrl: '/media/cover/fallback-1' },
-  { id: 'fallback-2', kind: 'album', title: '五人组', artist: 'Higher Brothers', artistId: 'fallback-hb', genre: 'RAP', genreBucket: 'hiphop', scene: 'mainstream', year: '2026', releaseDate: '2026-09-14', score: 9.1, comments: 376, desc: '把中文说唱的街头能量带到更大的舞台。', coverUrl: '/media/cover/fallback-2' },
-  { id: 'fallback-3', kind: 'album', title: '生于未来', artist: '法老', artistId: 'fallback-pharaoh', genre: 'RAP', genreBucket: 'hiphop', scene: 'underground', year: '2025', releaseDate: '2025-12-08', score: 9.0, comments: 318, desc: '锋利写作、密集叙事与一张完整的作品。', coverUrl: '/media/cover/fallback-3' },
-  { id: 'fallback-4', kind: 'album', title: 'The Album', artist: 'BLACKPINK', artistId: 'fallback-bp', genre: 'K-POP', genreBucket: 'kpop', scene: 'mainstream', year: '2025', releaseDate: '2025-10-02', score: 8.9, comments: 289, desc: '强烈的流行结构与舞台感。', coverUrl: '/media/cover/fallback-4' },
-  { id: 'fallback-5', kind: 'album', title: 'Pink Tape', artist: 'A$AP Rocky', artistId: 'fallback-rocky', genre: 'RAP', genreBucket: 'hiphop', scene: 'mainstream', year: '2025', releaseDate: '2025-07-18', score: 8.8, comments: 254, desc: '跨越地下美学与主流制作的混合体。', coverUrl: '/media/cover/fallback-5' },
-  { id: 'fallback-6', kind: 'album', title: 'REBEL', artist: 'G-DRAGON', artistId: 'fallback-gd', genre: 'K-POP', genreBucket: 'kpop', scene: 'mainstream', year: '2026', releaseDate: '2026-08-30', score: 8.7, comments: 231, desc: '个性化视觉与极具张力的流行表达。', coverUrl: '/media/cover/fallback-6' }
+  { id: 'fallback-1', kind: 'album', title: 'MUSE', artist: 'aespa', artistId: 'fallback-aespa', genre: 'K-POP', genreBucket: 'kpop', year: '2026', releaseDate: '2026-09-21', score: 9.4, comments: 428, desc: '未来感、强节拍与极具辨识度的世界观。', coverUrl: '/media/cover/fallback-1' },
+  { id: 'fallback-2', kind: 'album', title: '五人组', artist: 'Higher Brothers', artistId: 'fallback-hb', genre: 'RAP', genreBucket: 'hiphop', year: '2026', releaseDate: '2026-09-14', score: 9.1, comments: 376, desc: '把中文说唱的街头能量带到更大的舞台。', coverUrl: '/media/cover/fallback-2' },
+  { id: 'fallback-3', kind: 'album', title: '生于未来', artist: '法老', artistId: 'fallback-pharaoh', genre: 'RAP', genreBucket: 'hiphop', year: '2025', releaseDate: '2025-12-08', score: 9.0, comments: 318, desc: '锋利写作、密集叙事与一张完整的作品。', coverUrl: '/media/cover/fallback-3' },
+  { id: 'fallback-4', kind: 'album', title: 'The Album', artist: 'BLACKPINK', artistId: 'fallback-bp', genre: 'K-POP', genreBucket: 'kpop', year: '2025', releaseDate: '2025-10-02', score: 8.9, comments: 289, desc: '强烈的流行结构与舞台感。', coverUrl: '/media/cover/fallback-4' },
+  { id: 'fallback-5', kind: 'album', title: 'Pink Tape', artist: 'A$AP Rocky', artistId: 'fallback-rocky', genre: 'RAP', genreBucket: 'hiphop', year: '2025', releaseDate: '2025-07-18', score: 8.8, comments: 254, desc: '跨越地下美学与主流制作的混合体。', coverUrl: '/media/cover/fallback-5' },
+  { id: 'fallback-6', kind: 'album', title: 'REBEL', artist: 'G-DRAGON', artistId: 'fallback-gd', genre: 'K-POP', genreBucket: 'kpop', year: '2026', releaseDate: '2026-08-30', score: 8.7, comments: 231, desc: '个性化视觉与极具张力的流行表达。', coverUrl: '/media/cover/fallback-6' }
 ];
 
 const FALLBACK_ARTISTS = [
-  { id: 'fallback-aespa', name: 'aespa', genre: 'K-POP', scene: 'mainstream', region: '韩国', bio: '以未来感世界观、强烈编舞和电子流行为核心的女子组合。', avatarUrl: '/media/avatar/fallback-aespa', heroUrl: '/media/hero/fallback-aespa' },
-  { id: 'fallback-pharaoh', name: '法老', genre: 'RAP', scene: 'underground', region: '中国·上海', bio: '以叙事、社会观察与现场感染力著称的中文说唱音乐人。', avatarUrl: '/media/avatar/fallback-pharaoh', heroUrl: '/media/hero/fallback-pharaoh' },
-  { id: 'fallback-bp', name: 'BLACKPINK', genre: 'K-POP', scene: 'mainstream', region: '韩国', bio: '融合 Hip-Hop、流行与强舞台表现力的全球女子组合。', avatarUrl: '/media/avatar/fallback-bp', heroUrl: '/media/hero/fallback-bp' },
-  { id: 'fallback-rocky', name: 'A$AP Rocky', genre: 'RAP', scene: 'mainstream', region: '美国·纽约', bio: '将高端时装、视觉艺术与纽约说唱融合的艺术家。', avatarUrl: '/media/avatar/fallback-rocky', heroUrl: '/media/hero/fallback-rocky' }
+  { id: 'fallback-aespa', name: 'aespa', genre: 'K-POP', region: '韩国', bio: '以未来感世界观、强烈编舞和电子流行为核心的女子组合。', avatarUrl: '/media/avatar/fallback-aespa', heroUrl: '/media/hero/fallback-aespa' },
+  { id: 'fallback-pharaoh', name: '法老', genre: 'RAP', region: '中国·上海', bio: '以叙事、社会观察与现场感染力著称的中文说唱音乐人。', avatarUrl: '/media/avatar/fallback-pharaoh', heroUrl: '/media/hero/fallback-pharaoh' },
+  { id: 'fallback-bp', name: 'BLACKPINK', genre: 'K-POP', region: '韩国', bio: '融合 Hip-Hop、流行与强舞台表现力的全球女子组合。', avatarUrl: '/media/avatar/fallback-bp', heroUrl: '/media/hero/fallback-bp' },
+  { id: 'fallback-rocky', name: 'A$AP Rocky', genre: 'RAP', region: '美国·纽约', bio: '将高端时装、视觉艺术与纽约说唱融合的艺术家。', avatarUrl: '/media/avatar/fallback-rocky', heroUrl: '/media/hero/fallback-rocky' }
 ];
 
 const FALLBACK_POSTS = [
@@ -105,7 +105,6 @@ function activateKey(event) {
 }
 
 const bucketLabel = (bucket) => ({ hiphop: 'HipHop', kpop: 'K-POP', other: '其他' }[bucket] || '');
-const sceneLabel = (scene) => ({ mainstream: '主流', underground: '地下' }[scene] || '');
 const yearOf = (item) => item.year || String(item.releaseDate || '').slice(0, 4);
 const topicLabel = (key) => {
   const topics = state.community.topics.length ? state.community.topics : DEFAULT_TOPICS;
@@ -412,9 +411,7 @@ function splitHomeReleases(releases) {
   return { newReleases, editorsPicks };
 }
 
-// 三圈层入口：CHART_TABS 里已有 mainstream / underground / kpop 三个真实 tab，
-// 因此三张卡都直接切到对应榜单 tab（loadCharts 把 underground 映射为
-// genre=hiphop & scene=underground）。
+// 曲风入口：不再区分主流/地下，只按曲风（HipHop / K-POP）切到对应榜单 tab。
 const SCENE_ENTRIES = [
   { key: 'hiphop', en: 'HIPHOP', label: 'HipHop', sub: '说唱发行 · 榜单' },
   { key: 'kpop', en: 'K-POP', label: 'K-POP', sub: '流行发行 · 榜单' }
