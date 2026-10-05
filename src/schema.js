@@ -176,6 +176,21 @@ CREATE TABLE IF NOT EXISTS community_posts (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_posts_topic ON community_posts (topic, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS artist_taxonomy (
+  artist_id    TEXT PRIMARY KEY REFERENCES artists (id) ON DELETE CASCADE,
+  genre_bucket TEXT,
+  genre        TEXT,
+  confidence   REAL NOT NULL DEFAULT 0,
+  reason       TEXT,
+  evidence     TEXT,
+  evidence_key TEXT,
+  backend      TEXT NOT NULL DEFAULT 'heuristic',
+  status       TEXT NOT NULL DEFAULT 'suggested',
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artist_taxonomy_status ON artist_taxonomy (status);
 `;
 
 // Columns added after the first release. Applied by db.js for databases that

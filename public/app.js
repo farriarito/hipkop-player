@@ -45,8 +45,7 @@ const DEFAULT_TOPICS = [
 
 const CHART_TABS = [
   { key: 'all', label: '综合 TOP 50' },
-  { key: 'mainstream', label: '主流 HipHop' },
-  { key: 'underground', label: '地下 HipHop' },
+  { key: 'hiphop', label: 'HipHop' },
   { key: 'kpop', label: 'K-POP' }
 ];
 
@@ -55,12 +54,6 @@ const BUCKET_TABS = [
   { key: 'hiphop', label: 'HipHop' },
   { key: 'kpop', label: 'K-POP' },
   { key: 'other', label: '其他' }
-];
-
-const SCENE_TABS = [
-  { key: 'all', label: '全部场景' },
-  { key: 'mainstream', label: '主流' },
-  { key: 'underground', label: '地下' }
 ];
 
 const SORT_TABS = [
@@ -85,7 +78,7 @@ const state = {
   chartTab: 'all',
   chartSort: 'popularity',
   discover: null,
-  browse: { bucket: 'all', scene: 'all', year: 'all', sort: 'date', items: [] },
+  browse: { bucket: 'all', year: 'all', sort: 'date', items: [] },
   community: { topic: 'all', items: [], topics: [] },
   stats: null,
   categories: null,
@@ -121,7 +114,7 @@ const topicLabel = (key) => {
 };
 
 function tagLine(item) {
-  const tags = [item.genre, bucketLabel(item.genreBucket), sceneLabel(item.scene)].filter(Boolean);
+  const tags = [item.genre, bucketLabel(item.genreBucket)].filter(Boolean);
   const seen = new Set();
   return tags.filter((tag) => {
     const key = String(tag).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
@@ -217,7 +210,7 @@ function trackRow(track, index, options = {}) {
 }
 
 function artistResult(artist) {
-  const tags = [artist.genre, sceneLabel(artist.scene)].filter(Boolean).join(' · ');
+  const tags = [artist.genre, bucketLabel(artist.genreBucket)].filter(Boolean).join(' · ');
   return `<div class="artist-result" role="button" tabindex="0" aria-label="查看艺人 ${esc(artist.name || '')}" onclick="artistDetail('${esc(artist.id)}')" onkeydown="activateKey(event)">${avatar(artist)}<div><b>${esc(artist.name)}</b><small>${esc(tags || '艺人')}${artist.region ? ' · ' + esc(artist.region) : ''}</small></div><span aria-hidden="true">→</span></div>`;
 }
 
@@ -245,9 +238,13 @@ function heroSlides() {
 
 function heroCopy(album) {
   const tags = tagLine(album).join(' · ');
+  const byline = [
+    album.artist ? `<span class="byline-artist">${esc(album.artist)}</span>` : '',
+    album.releaseDate ? `<span class="byline-date">${esc(album.releaseDate)}</span>` : ''
+  ].filter(Boolean).join('');
   return `<span class="eyebrow">HIPKOP PICK${tags ? ' · ' + esc(tags) : ''}</span>
         <h1>${esc(album.title)}</h1>
-        <p>${esc(album.artist)}${album.releaseDate ? ' · ' + esc(album.releaseDate) : ''}</p>
+        <p class="hero-byline">${byline}</p>
         <span class="hero-cta">查看专辑 <span aria-hidden="true">→</span></span>`;
 }
 
@@ -419,8 +416,7 @@ function splitHomeReleases(releases) {
 // 因此三张卡都直接切到对应榜单 tab（loadCharts 把 underground 映射为
 // genre=hiphop & scene=underground）。
 const SCENE_ENTRIES = [
-  { key: 'mainstream', en: 'MAINSTREAM HIPHOP', label: '主流 HipHop', sub: '主流发行 · 榜单' },
-  { key: 'underground', en: 'UNDERGROUND HIPHOP', label: '地下 HipHop', sub: '地下场景 · 榜单' },
+  { key: 'hiphop', en: 'HIPHOP', label: 'HipHop', sub: '说唱发行 · 榜单' },
   { key: 'kpop', en: 'K-POP', label: 'K-POP', sub: '流行发行 · 榜单' }
 ];
 
@@ -428,7 +424,7 @@ function sceneRail() {
   const cards = SCENE_ENTRIES
     .map((scene) => `<div class="feature" role="button" tabindex="0" aria-label="查看${esc(scene.label)}榜单" onclick="goScene('${scene.key}')" onkeydown="activateKey(event)"><b>${esc(scene.en)}</b><h3>${esc(scene.label)}</h3><p>${esc(scene.sub)}</p></div>`)
     .join('');
-  return `<section class="section scene-rail"><div class="section-head"><h2>三大圈层</h2></div><div class="feature-grid">${cards}</div></section>`;
+  return `<section class="section scene-rail"><div class="section-head"><h2>曲风入口</h2></div><div class="feature-grid">${cards}</div></section>`;
 }
 
 async function goScene(tab) {
@@ -452,7 +448,7 @@ async function viewHome() {
   state.stats = healthData ? healthData.stats : null;
   state.community.items = postData && postData.items && postData.items.length ? postData.items : FALLBACK_POSTS;
   if (postData && postData.topics) state.community.topics = postData.topics;
-  state.pick = null;
+  // Keep state.pick: 「换一个」 sets it and the re-render must not wipe it.
 
   const { newReleases, editorsPicks } = splitHomeReleases(state.releases);
   state.homeNewIds = new Set(newReleases.map((item) => item.id));
@@ -462,7 +458,7 @@ async function viewHome() {
     ${statStrip()}
     ${sceneRail()}
     <section class="section"><div class="section-head"><h2>新作</h2><a role="button" tabindex="0" aria-label="查看全部新作" onclick="navigate('discover')" onkeydown="activateKey(event)">查看全部 <span aria-hidden="true">→</span></a></div><div class="release-scroller">${newReleases.map(releaseCard).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>今日同频</h2><span class="section-action" role="button" tabindex="0" aria-label="换一个推荐" onclick="randomPick();paint();" onkeydown="activateKey(event)">换一个 <span aria-hidden="true">↻</span></span></div>${pickView()}</section>
+    <section class="section"><div class="section-head"><h2>今日同频</h2><button class="section-action" type="button" aria-label="换一个推荐" onclick="randomPick();paint();">换一个 <span aria-hidden="true">↻</span></button></div>${pickView()}</section>
     <section class="section"><div class="section-head"><h2>编辑推荐</h2><a role="button" tabindex="0" aria-label="查看全部编辑推荐" onclick="navigate('discover')" onkeydown="activateKey(event)">查看全部 <span aria-hidden="true">→</span></a></div><div class="cards">${editorsPicks.map(albumCard).join('')}</div></section>
     <section class="section"><div class="section-head"><h2>编辑榜 TOP10 <span class="eyebrow">编辑分 · 每日更新</span></h2><a role="button" tabindex="0" aria-label="查看完整榜单" onclick="navigate('charts')" onkeydown="activateKey(event)">完整榜单 <span aria-hidden="true">→</span></a></div><div class="rank-list">${charts.map((album, index) => rankRow(album, index)).join('')}</div></section>
     <section class="section"><div class="section-head"><h2>最新评论</h2><a role="button" tabindex="0" aria-label="进入社区" onclick="navigate('community')" onkeydown="activateKey(event)">进入社区 <span aria-hidden="true">→</span></a></div><div class="community-list">${posts.map(postCard).join('')}</div></section>`;
@@ -471,8 +467,7 @@ async function viewHome() {
 async function loadCharts() {
   const params = new URLSearchParams({ sort: state.chartSort, limit: '50' });
   if (state.chartTab === 'kpop') params.set('genre', 'kpop');
-  else if (state.chartTab === 'mainstream') { params.set('genre', 'hiphop'); params.set('scene', 'mainstream'); }
-  else if (state.chartTab === 'underground') { params.set('genre', 'hiphop'); params.set('scene', 'underground'); }
+  else if (state.chartTab === 'hiphop') params.set('genre', 'hiphop');
   const data = await safeApi(`/api/charts?${params}`, null);
   state.charts = data && data.items ? data.items : [];
   state.offline = !data;
@@ -483,7 +478,9 @@ function rankRow(album, index, context) {
     ? state.chartSort === 'date'
       ? esc(album.releaseDate || yearOf(album) || '—')
       : state.chartSort === 'popularity'
-        ? `<span aria-hidden="true">🔥 </span>${heatPercent(album)}%`
+        ? album.popularity == null
+          ? '<span class="rank-heat-none" title="该专辑暂无榜单热度数据">—</span>'
+          : `<span aria-hidden="true">🔥 </span>${heatPercent(album)}%`
         : album.score != null ? Number(album.score).toFixed(1) : '—'
     : album.score != null ? Number(album.score).toFixed(1) : '—';
   const sub = `${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}${context === 'charts' && album.year ? ' · ' + esc(album.year) : ''}`;
@@ -497,7 +494,7 @@ function chartsList() {
 
 async function viewCharts() {
   await loadCharts();
-  return `<div class="page-title"><span class="eyebrow">HIPKOP CHARTS</span><h1>榜单</h1><p>综合、主流 HipHop、地下 HipHop 与 K-POP 分桶，来自元数据 Provider 与 Apple 榜单同步。</p>
+  return `<div class="page-title"><span class="eyebrow">HIPKOP CHARTS</span><h1>榜单</h1><p>综合、HipHop 与 K-POP 分桶，数据来自元数据 Provider 与 Apple 榜单同步。排序口径：热度取 Apple 榜单排名，评分取编辑分。</p>
     <div class="chips" role="group" aria-label="榜单分类">${CHART_TABS.map((tab) => `<button class="chip ${state.chartTab === tab.key ? 'active' : ''}" type="button" aria-pressed="${state.chartTab === tab.key}" onclick="setChartTab('${tab.key}')">${esc(tab.label)}</button>`).join('')}</div>
     <div class="sort-row"><label for="chartSort">排序</label><select id="chartSort" onchange="setChartSort(this.value)">
       <option value="popularity" ${state.chartSort === 'popularity' ? 'selected' : ''}>榜单热度</option>
@@ -523,7 +520,6 @@ function yearTabs() {
 async function loadBrowse() {
   const params = new URLSearchParams({ limit: '40', sort: state.browse.sort });
   if (state.browse.bucket !== 'all') params.set('bucket', state.browse.bucket);
-  if (state.browse.scene !== 'all') params.set('scene', state.browse.scene);
   if (state.browse.year !== 'all') params.set('year', state.browse.year);
   const data = await safeApi(`/api/albums?${params}`, null);
   state.browse.items = data && data.items ? data.items : [];
@@ -561,7 +557,6 @@ async function viewDiscover() {
     ${offlineNotice()}
     <section class="section" id="browseSection"><div class="section-head"><h2>筛选</h2><span class="section-action" aria-live="polite">${state.browse.items.length} 张作品</span></div>
       <div class="filter-block"><label>风格</label>${chips(BUCKET_TABS, state.browse.bucket, 'setBrowseBucket', '风格筛选')}</div>
-      <div class="filter-block"><label>场景</label>${chips(SCENE_TABS, state.browse.scene, 'setBrowseScene', '场景筛选')}</div>
       <div class="filter-block"><label>年份</label>${chips(years, state.browse.year, 'setBrowseYear', '年份筛选')}</div>
       <div class="sort-row"><label for="browseSort">排序</label><select id="browseSort" onchange="setBrowseSort(this.value)">${SORT_TABS.map((tab) => `<option value="${tab.key}" ${state.browse.sort === tab.key ? 'selected' : ''}>${esc(tab.label)}</option>`).join('')}</select></div>
       <div id="browseResults">${browseListHtml()}</div>
@@ -587,7 +582,7 @@ async function viewCommunity() {
 /* --------------------------------- profile -------------------------------- */
 
 function viewProfile() {
-  return `<div class="page-title"><span class="eyebrow">MY HIPKOP</span><h1>我的</h1></div><div class="profile-card"><div class="avatar" aria-hidden="true">H</div><div><h2>游客</h2><p>登录后同步你的收藏、乐评与关注</p></div><button class="login" type="button" onclick="toast('本地演示模式：登录功能已禁用')">登录</button></div><div class="menu"><div class="menu-item" role="button" tabindex="0" aria-label="我的收藏" onclick="toast('收藏夹为空')" onkeydown="activateKey(event)">我的收藏 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="我的乐评" onclick="toast('登录后查看我的乐评')" onkeydown="activateKey(event)">我的乐评 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="消息通知" onclick="toast('暂无通知')" onkeydown="activateKey(event)">消息通知 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="目录与 Provider 状态" onclick="showStatus()" onkeydown="activateKey(event)">目录与 Provider 状态 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="关于 HIPKOP PLAYER" onclick="toast('HIPKOP PLAYER v0.3 · 元数据目录')" onkeydown="activateKey(event)">关于 HIPKOP PLAYER <span aria-hidden="true">→</span></div></div>`;
+  return `<div class="page-title"><span class="eyebrow">MY HIPKOP</span><h1>我的</h1></div><div class="profile-card"><div class="avatar" aria-hidden="true">H</div><div><h2>游客</h2><p>登录后同步你的收藏、乐评与关注</p></div></div><div class="menu"><div class="menu-item" role="button" tabindex="0" aria-label="我的收藏" onclick="toast('收藏夹为空')" onkeydown="activateKey(event)">我的收藏 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="我的乐评" onclick="toast('登录后查看我的乐评')" onkeydown="activateKey(event)">我的乐评 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="消息通知" onclick="toast('暂无通知')" onkeydown="activateKey(event)">消息通知 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="目录与 Provider 状态" onclick="showStatus()" onkeydown="activateKey(event)">目录与 Provider 状态 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="关于 HIPKOP PLAYER" onclick="toast('HIPKOP PLAYER v0.3 · 元数据目录')" onkeydown="activateKey(event)">关于 HIPKOP PLAYER <span aria-hidden="true">→</span></div></div>`;
 }
 
 /* ------------------------------ navigation -------------------------------- */
@@ -707,7 +702,7 @@ async function artistDetail(id) {
   }
   state.offline = false;
   const { artist, albums, tracks } = data;
-  const tags = [artist.genre, bucketLabel(artist.genreBucket), sceneLabel(artist.scene), artist.region].filter(Boolean).join(' · ');
+  const tags = [artist.genre, bucketLabel(artist.genreBucket), artist.region].filter(Boolean).join(' · ');
   view.innerHTML = `<div class="artist-page">${backButton()}
     <div class="artist-hero" style="background-image:url('${esc(artist.heroUrl)}')"><div class="artist-overlay"></div>
       <div class="artist-info">${avatar(artist)}<div>
@@ -727,7 +722,10 @@ function followArtist() {
 
 function randomPick() {
   const pool = pickPool();
-  state.pick = pool[Math.floor(Math.random() * pool.length)];
+  const currentId = state.pick && state.pick.id;
+  const choices = pool.length > 1 && currentId ? pool.filter((item) => item.id !== currentId) : pool;
+  const source = choices.length ? choices : pool;
+  state.pick = source[Math.floor(Math.random() * source.length)];
   return state.pick;
 }
 
@@ -754,10 +752,6 @@ async function setBrowse(key, value) {
 
 function setBrowseBucket(value) {
   return setBrowse('bucket', value);
-}
-
-function setBrowseScene(value) {
-  return setBrowse('scene', value);
 }
 
 function setBrowseYear(value) {

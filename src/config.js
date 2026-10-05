@@ -67,6 +67,14 @@ module.exports = {
       '顽童MJ116,蛋堡,ØZI,李尔新,AnsrJ,OneOne,雾都'
   ),
 
+  // Taxonomy agent. Empty agentUrl keeps the deterministic offline heuristic;
+  // set it to an OpenAI-compatible endpoint to upgrade the low-confidence cases.
+  agentUrl: env.HIPKOP_AGENT_URL || '',
+  agentKey: env.HIPKOP_AGENT_KEY || '',
+  agentModel: env.HIPKOP_AGENT_MODEL || '',
+  agentMinConfidence: Number(env.HIPKOP_AGENT_MIN_CONFIDENCE || 0.7),
+  agentBatchSize: Number(env.HIPKOP_AGENT_BATCH || 50),
+
   // Caching
   cacheTtlMs: Number(env.HIPKOP_CACHE_TTL_HOURS || 24) * 3600 * 1000,
   mediaMaxBytes: Number(env.HIPKOP_MEDIA_MAX_BYTES || 8 * 1024 * 1024),

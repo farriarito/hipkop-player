@@ -71,6 +71,7 @@ const serializeAlbum = (album, extra = {}) => {
     score: album.score ?? null,
     popularity: album.popularity ?? null,
     searchHeat: album.popularity ?? null,
+    heatSource: album.popularity == null ? null : album.chartSource || 'provider',
     comments: album.comments ?? 0,
     desc: album.description || '',
     externalUrl: album.externalUrl || null,

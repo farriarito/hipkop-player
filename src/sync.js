@@ -6,6 +6,7 @@
 //   releases       — daily: scan seed artists for recently released albums
 //   charts         — weekly: Apple Marketing RSS top albums (real chart ranks)
 //   artist-refresh — daily: refresh stale artist profiles + related works
+//   taxonomy       — daily: classify unlabelled artists (HipHop / K-POP / other)
 //   artist / album / search — on demand from the API
 // Failed jobs are retried with exponential backoff and recorded in sync_jobs.
 
@@ -15,6 +16,7 @@ const providers = require('./providers');
 const media = require('./media');
 const search = require('./search');
 const { calibrate } = require('./calibrate');
+const { runTaxonomyAgent } = require('./agents/taxonomy');
 const N = require('./normalize');
 const { fetchJson } = require('./util/http');
 const log = require('./util/logger')('sync');
@@ -271,6 +273,8 @@ async function runJob(job) {
       return refreshStaleArtists(payload);
     case 'calibrate':
       return runCalibration();
+    case 'taxonomy':
+      return runTaxonomyAgent(payload);
     default:
       throw new Error(`unknown_job_type:${job.type}`);
   }
@@ -287,6 +291,7 @@ async function afterJob(job) {
   }
   if (job.type === 'artist-refresh') runCalibration();
   if (job.type === 'calibrate') scheduleRecurring('calibrate', DAY, { bootstrapDelayMs: 12 * HOUR });
+  if (job.type === 'taxonomy') scheduleRecurring('taxonomy', DAY, { bootstrapDelayMs: 12 * HOUR });
 }
 
 async function executeJob(job) {
@@ -332,6 +337,7 @@ function bootstrapSchedule() {
   scheduleRecurring('charts', 7 * DAY, { bootstrapDelayMs: 1500 });
   scheduleRecurring('artist-refresh', DAY, { bootstrapDelayMs: 20 * 1000 });
   scheduleRecurring('calibrate', DAY, { bootstrapDelayMs: 40 * 1000 });
+  scheduleRecurring('taxonomy', DAY, { bootstrapDelayMs: 60 * 1000 });
 }
 
 async function syncOnce({ withCharts = true } = {}) {
@@ -357,6 +363,7 @@ module.exports = {
   syncAlbum,
   syncSearch,
   refreshStaleArtists,
+  runTaxonomyAgent,
   precache,
   drainWarmQueue,
   syncOnce,

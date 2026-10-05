@@ -575,7 +575,7 @@ function albumWhere({ bucket, scene, genre, from, to, year, core = false } = {})
 }
 
 const ORDER_BY = {
-  popularity: 'COALESCE(al.popularity, -1) DESC, al.score DESC, al.release_date DESC',
+  popularity: 'al.popularity DESC NULLS LAST, al.release_date DESC NULLS LAST, al.score DESC',
   score: 'al.score DESC, al.release_date DESC',
   date: 'al.release_date DESC NULLS LAST, al.score DESC',
   title: 'al.title ASC'
@@ -600,39 +600,6 @@ const GENRE_FILTERS = {
   hiphop: "(LOWER(COALESCE(al.genre, '')) LIKE '%rap%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip-hop%' OR LOWER(COALESCE(al.genre, '')) LIKE '%hip hop%')"
 };
 
-const cultureBucket = (row) => {
-  const genre = String(row.genre || '').toLowerCase();
-  if (/k.?pop|korean/.test(genre)) return 'kpop';
-  const identity = `${row.primaryArtistName || ''} ${row.artistDisplay || ''} ${row.primaryArtistRegion || ''}`;
-  return /[\u4e00-\u9fff]|china|中国|taiwan|台湾|hong kong|香港|mandarin/i.test(identity) ? 'rap-cn' : 'rap-global';
-};
-
-// Keep the globally highest-ranked item first, then rotate through the culture
-// buckets so one chart shows mainstream, underground and K-POP side by side.
-function balancedChartRows(rows, limit) {
-  const groups = { 'rap-cn': [], 'rap-global': [], kpop: [] };
-  for (const row of rows) {
-    const bucket = cultureBucket(row);
-    if (groups[bucket]) groups[bucket].push(row);
-  }
-  const order = ['rap-cn', 'rap-global', 'kpop'];
-  if (order.filter((key) => groups[key].length).length <= 1) return rows.slice(0, limit);
-  const ordered = [];
-  if (rows[0]) {
-    ordered.push(rows[0]);
-    const first = groups[cultureBucket(rows[0])];
-    const index = first.findIndex((row) => row.id === rows[0].id);
-    if (index >= 0) first.splice(index, 1);
-  }
-  let cursor = (order.indexOf(cultureBucket(rows[0] || {})) + 1 + order.length) % order.length;
-  while (ordered.length < limit && order.some((key) => groups[key].length)) {
-    const key = order[cursor % order.length];
-    if (groups[key].length) ordered.push(groups[key].shift());
-    cursor += 1;
-  }
-  return ordered;
-}
-
 function listReleases({ from = null, to = null, bucket = null, scene = null, core = true, limit = 30 } = {}) {
   // Home "新作" defaults to core culture; an explicit bucket/scene (discover)
   // still reaches the full catalogue.
@@ -651,15 +618,17 @@ function listReleases({ from = null, to = null, bucket = null, scene = null, cor
   return listAlbumsBrowse({ from, to, bucket, scene, sort: 'date', limit });
 }
 
+// Charts honour the requested sort literally: what the user sees is exactly the
+// order the database produced. An earlier version re-interleaved language
+// buckets here, which silently broke both "sort by heat" and "sort by date".
 function listCharts({ genre = 'all', scene = 'all', sort = 'popularity', limit = 50 } = {}) {
-  const rows = listAlbumsBrowse({
+  return listAlbumsBrowse({
     bucket: genre === 'all' ? null : genre,
     scene: scene === 'all' ? null : scene,
     sort,
     core: genre === 'all',
-    limit: sort === 'date' ? limit : Math.max(limit * 4, 120)
+    limit
   });
-  return sort === 'date' ? rows : balancedChartRows(rows, limit);
 }
 
 const staleArtists = (sinceIso, limit = 25) =>
@@ -845,9 +814,93 @@ const listJobs = (limit = 50) =>
     [limit]
   );
 
+// ---------------------------------------------------------------------------
+// Taxonomy agent
+// ---------------------------------------------------------------------------
+
+// Artists we have no bucket for, richest evidence first.
+const listTaxonomyCandidates = (limit = 50) =>
+  all(
+    `SELECT ar.id, ar.name, ar.genre, ar.region, ar.provider
+       FROM artists ar
+      WHERE ar.genre_bucket IS NULL
+      ORDER BY (SELECT COUNT(*) FROM album_artists aa WHERE aa.artist_id = ar.id) DESC,
+               ar.name ASC
+      LIMIT ?`,
+    [limit]
+  );
+
+const listArtistGenreEvidence = (ids = []) => {
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return all(
+    `SELECT aa.artist_id AS artistId, al.genre AS genre, COUNT(*) AS count
+       FROM album_artists aa
+       JOIN albums al ON al.id = aa.album_id
+      WHERE aa.artist_id IN (${placeholders})
+        AND al.genre IS NOT NULL AND al.genre <> ''
+      GROUP BY aa.artist_id, al.genre
+      ORDER BY count DESC, al.genre ASC`,
+    ids
+  );
+};
+
+const saveArtistTaxonomy = (entry) =>
+  run(
+    `INSERT INTO artist_taxonomy
+       (artist_id, genre_bucket, genre, confidence, reason, evidence, evidence_key, backend, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(artist_id) DO UPDATE SET
+       genre_bucket = excluded.genre_bucket,
+       genre        = excluded.genre,
+       confidence   = excluded.confidence,
+       reason       = excluded.reason,
+       evidence     = excluded.evidence,
+       evidence_key = excluded.evidence_key,
+       backend      = excluded.backend,
+       status       = excluded.status,
+       updated_at   = excluded.updated_at`,
+    [
+      entry.artistId,
+      entry.genreBucket,
+      n(entry.genre),
+      Number(entry.confidence) || 0,
+      n(entry.reason),
+      n(entry.evidence),
+      n(entry.evidenceKey),
+      entry.backend || 'heuristic',
+      entry.status || 'suggested',
+      nowIso(),
+      nowIso()
+    ]
+  );
+
+// Only ever fills a blank bucket / genre - a real provider value always wins.
+const promoteArtistTaxonomy = (artistId, { genreBucket, genre } = {}) =>
+  run(
+    `UPDATE artists
+        SET genre_bucket = COALESCE(genre_bucket, ?),
+            genre = COALESCE(genre, ?),
+            updated_at = ?
+      WHERE id = ?`,
+    [n(genreBucket), n(genre), nowIso(), artistId]
+  );
+
+const taxonomySummary = () => ({
+  candidates: get(`SELECT COUNT(*) AS c FROM artists WHERE genre_bucket IS NULL`).c,
+  applied: get(`SELECT COUNT(*) AS c FROM artist_taxonomy WHERE status = 'applied'`).c,
+  suggested: get(`SELECT COUNT(*) AS c FROM artist_taxonomy WHERE status = 'suggested'`).c,
+  byBucket: all(`SELECT COALESCE(genre_bucket, 'unknown') AS bucket, COUNT(*) AS count FROM artists GROUP BY genre_bucket ORDER BY count DESC`)
+});
+
 module.exports = {
   setSource,
   listSources,
+  listTaxonomyCandidates,
+  listArtistGenreEvidence,
+  saveArtistTaxonomy,
+  promoteArtistTaxonomy,
+  taxonomySummary,
   upsertArtist,
   ensureArtistRef,
   setArtistSyncError,
