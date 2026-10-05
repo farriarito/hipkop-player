@@ -388,9 +388,19 @@ function backfillBuckets() {
   let artists = 0;
   let albums = 0;
   const clean = (value) => (value && value !== 'unknown' ? value : null);
+  // Artist buckets decided by the taxonomy agent are authoritative. An iTunes
+  // artist row almost never carries a genre, so recomputing from it would null
+  // out every committed verdict on the next calibration pass.
+  const committed = new Set(
+    all(`SELECT artist_id FROM artist_taxonomy WHERE status = 'applied'`).map((row) => row.artist_id)
+  );
   for (const row of all(`SELECT id, name, genre, genre_bucket AS bucket, scene FROM artists`)) {
-    const bucket = clean(T.genreBucket(row.genre));
-    const scene = clean(T.sceneFor(row.name, T.genreBucket(row.genre)));
+    if (committed.has(row.id)) continue;
+    const derived = T.genreBucket(row.genre);
+    // A null derivation means "no evidence", never "no genre": keep whatever
+    // bucket is already stored instead of clearing it.
+    const bucket = clean(derived) || row.bucket;
+    const scene = clean(T.sceneFor(row.name, derived));
     if (bucket !== row.bucket || (scene && scene !== row.scene)) {
       run(`UPDATE artists SET genre_bucket = ?, scene = COALESCE(?, scene), updated_at = ? WHERE id = ?`, [
         bucket, scene, nowIso(), row.id

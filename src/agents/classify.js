@@ -8,16 +8,15 @@
 // row itself. Everything here is pure and deterministic so it can be unit-tested
 // and re-run safely.
 
+const T = require('../taxonomy');
+
 // Order matters: "K-Pop" must win over the generic /pop/ fallback, and
-// "Chinese Hip-Hop" must win over any pop-ish match.
+// "Chinese Hip-Hop" must win over any pop-ish match. The keyword sets live in
+// ../taxonomy so the artist bucket and the album bucket cannot drift apart.
 const RULES = [
-  { bucket: 'kpop', weight: 3, re: /k-?\s?pop|korean|korea/i },
-  { bucket: 'hiphop', weight: 3, re: /hip[\s-]?hop|\brap\b|trap|drill|grime|boom\s?bap|说唱|嘻哈/i },
-  {
-    bucket: 'other',
-    weight: 1,
-    re: /r&b|soul|pop|dance|electronic|mandopop|j-?pop|rock|country|soundtrack|alternative|classical|jazz|metal|reggae|ballad|indie|music/i
-  }
+  { bucket: 'kpop', weight: 3, re: T.KPOP_RE },
+  { bucket: 'hiphop', weight: 3, re: T.HIPHOP_RE },
+  { bucket: 'other', weight: 1, re: T.OTHER_RE }
 ];
 
 const ruleForGenre = (genre) => {

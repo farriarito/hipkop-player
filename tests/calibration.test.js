@@ -20,6 +20,7 @@ const api = require('../src/api');
 const T = require('../src/taxonomy');
 const { buildListenLinks } = require('../src/listen');
 const { calibrate } = require('../src/calibrate');
+const { classifyArtist } = require('../src/agents/classify');
 
 const makeRes = () => {
   const res = { status: 0, headers: null, raw: '' };
@@ -180,4 +181,69 @@ test('api: health exposes stats, consistency and categories', async () => {
   assert.ok(body.stats.albums >= 1);
   assert.strictEqual(body.consistency.duplicateAlbums, 0);
   assert.ok(Array.isArray(body.categories.buckets));
+});
+
+test('taxonomy: non-Latin genre tags land in the right bucket', () => {
+  // iTunes ships these for Korean and Japanese releases. Before the shared
+  // keyword set they fell through to "other", which hid real Hip-Hop albums
+  // from the HipHop chart.
+  assert.strictEqual(T.genreBucket('힙합/랩'), 'hiphop');
+  assert.strictEqual(T.genreBucket('ヒップホップ／ラップ'), 'hiphop');
+  assert.strictEqual(T.genreBucket('说唱'), 'hiphop');
+  assert.strictEqual(T.genreBucket('驛舌'), 'hiphop');
+  assert.strictEqual(T.genreBucket('케이팝'), 'kpop');
+  assert.strictEqual(T.genreBucket('ロック'), 'other');
+  assert.strictEqual(T.genreBucket('음악'), 'other');
+  // The K-Pop keyword is "korean pop", not "korean", so this stays hiphop.
+  assert.strictEqual(T.genreBucket('Korean Hip-Hop'), 'hiphop');
+});
+
+test('taxonomy: the artist agent and the album bucket share one keyword set', () => {
+  for (const genre of ['힙합/랩', 'ヒップホップ／ラップ', 'K-Pop', 'Chinese Hip-Hop', 'Death Metal/Black Metal']) {
+    assert.strictEqual(
+      classifyArtist({ albums: [{ genre, count: 4 }] }).genreBucket,
+      T.genreBucket(genre),
+      genre
+    );
+  }
+});
+
+test('calibrate: a committed taxonomy verdict survives the bucket backfill', () => {
+  const ref = N.normalizeArtistRef('itunes', '9100', 'Committed Act');
+  repo.persistAlbum(
+    {
+      provider: 'itunes',
+      providerId: 'keep-1',
+      title: 'Keep One',
+      artistDisplay: 'Committed Act',
+      artistRefs: [ref],
+      coverUrl: 'https://example.test/keep-1.jpg',
+      releaseDate: '2026-02-02',
+      genre: null
+    },
+    []
+  );
+  const artistId = 'itunes-artist-9100';
+  assert.strictEqual(repo.getArtistRow(artistId).genreBucket, null, 'starts blank');
+
+  repo.saveArtistTaxonomy({
+    artistId,
+    genreBucket: 'hiphop',
+    genre: 'Hip-Hop/Rap',
+    confidence: 0.9,
+    reason: 'test fixture',
+    evidence: 'Hip-Hop/Rap x3',
+    evidenceKey: 'fixture',
+    backend: 'heuristic',
+    status: 'applied'
+  });
+  repo.promoteArtistTaxonomy(artistId, { genreBucket: 'hiphop', genre: 'Hip-Hop/Rap' });
+  assert.strictEqual(repo.getArtistRow(artistId).genreBucket, 'hiphop');
+
+  calibrate();
+  assert.strictEqual(
+    repo.getArtistRow(artistId).genreBucket,
+    'hiphop',
+    'the backfill must never erase a committed verdict'
+  );
 });

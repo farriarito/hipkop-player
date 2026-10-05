@@ -5,17 +5,18 @@ HIPKOP PLAYER 是面向 **全球 HipHop/Rap + K-POP** 听众的竖屏音乐体�
 ## 已实现
 
 - 竖屏手机壳：首页 / 榜单 / 发现 / 社区 / 我的
-- **跨圈层分桶**（`src/taxonomy.js`）：主流 HipHop、地下 HipHop、K-POP 与「其他」按 `genre_bucket` + `scene` 打标；榜单/发现可切换分桶，风格标签与艺人分桶互为补充
+- **曲风分桶**（`src/taxonomy.js`）：统一为 HipHop / K-POP / 其他三档，榜单与发现共用一条 `genre_bucket` 轴，不再区分「主流 / 地下」
+- **艺人分桶 Agent**（`src/agents/`，`npm run agent:taxonomy`）：iTunes 的艺人行九成没有流派，因此改按艺人自有专辑的流派分布投票分桶，置信度不足就挂起等更多数据。专辑桶与艺人桶共用同一套关键词，含韩文 `힙합/랩`、日文 `ヒップホップ／ラップ`、中文 `说唱` 等非拉丁标签；可选接 OpenAI 兼容端点处理低置信度样本
 - **SQLite 元数据目录**（Node 内置 `node:sqlite`，零依赖）：`artists` / `albums` / `tracks` / `album_artists` / `track_artists` / `metadata_sources` / `cover_cache` / `sync_jobs` / `community_posts` / `album_aliases`
 - **合法、稳定的元数据 Provider**：iTunes/Apple Music（封面 + 作品，无需 Key）、MusicBrainz（艺人资料富化，无需 Key），可选 Deezer（艺人头像）与 Last.fm（需 `LASTFM_API_KEY`）
 - **搜索**：本地目录优先，结果不足时调用 Provider，归一化后落库并建立艺人-专辑-曲目关联；结果按 艺人 / 专辑 / 单曲 分组
 - **真实封面与头像**：服务端把第三方图下载到本地缓存，前端只使用 `/media/...`
 - **封面代理 / 本地缓存 / 失败重试**：指数退避 + 失败记录 + 占位图
 - **听完整版而不是试听片段**：每个专辑/单曲都带 `listen.platforms`（QQ 音乐 / 网易云 / Apple Music）。有授权 ID 时用精确 detail 链接，否则用平台的搜索深链；前端「在 QQ 音乐听完整版 ↗」直接跳转，另可打开「选择收听平台」弹层
-- **数据库校准**（`src/calibrate.js`）：合并跨 storefront 的重复专辑/曲目、合并桩艺人、回填发行日期 / 曲目数 / 艺人展示名、封面统一到 900px 主图、重算分桶；`/api/sync/calibrate` 幂等可重复执行
+- **数据库校准**（`src/calibrate.js`）：合并跨 storefront 的重复专辑/曲目、合并桩艺人、回填发行日期 / 曲目数 / 艺人展示名、封面统一到 900px 主图、重算分桶；`/api/sync/calibrate` 幂等可重复执行。已由 Agent 提交的艺人分桶不会被回填覆盖
 - **API**：`/api/search`、`/api/albums`（筛选）、`/api/albums/:id`、`/api/artists/:id`、`/api/tracks/:id`、`/api/releases`、`/api/charts`、`/api/categories`、`/api/community/posts`、`/api/sync/*`
 - **社区**：`community_posts` 落库，支持按 topic（安利 / 新作 / 演出 / 乐评 / 闲聊）浏览与发帖
-- **定时同步**：每日新作、每周榜单（Apple 榜单 RSS）、每日艺人资料刷新、每日校准，失败重试与退避
+- **定时同步**：每日新作、每周榜单（Apple 榜单 RSS，us/kr/jp 多区合并、各专辑取最好名次）、每日艺人资料刷新、每日校准、每日艺人分桶，失败重试与退避
 - **首页结构对齐 Soundive 小程序**：hero 轮播 → 统计条 → 新作横滑 → 今日同频 → 编辑推荐 → 热评专辑榜 → 最新评论
 - 前端静态数组已替换为 API 数据，静态数据仅作为**离线 fallback**
 
@@ -38,6 +39,8 @@ npm start
 ```powershell
 npm run sync                 # 榜单 + 新作 + 队列
 node scripts/sync-once.js --no-charts
+npm run agent:taxonomy       # 艺人分桶 dry-run
+npm run agent:taxonomy -- --apply --limit 500   # 落库
 ```
 
 ## 目录结构
@@ -51,7 +54,8 @@ src/normalize.js           统一数据模型与确定性评分
 src/repo.js                目录读写（UPSERT、关联、查询、任务、缓存）
 src/search.js              本地优先搜索 -> Provider -> 归一化 -> 落库
 src/media.js               /media/cover|avatar|hero 代理与本地缓存
-src/taxonomy.js            跨圈层分桶（genre_bucket / scene）
+src/taxonomy.js            曲风分桶关键词（专辑与艺人共用）+ scene 策展
+src/agents/                艺人分桶 Agent（classify / model / taxonomy）
 src/listen.js              QQ 音乐 / 网易云 / Apple Music 收听深链
 src/calibrate.js           数据库校准（去重、回填、封面归一化）
 src/sync.js                同步任务与执行器（含退避重试）
