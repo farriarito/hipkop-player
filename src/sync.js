@@ -104,35 +104,78 @@ function registerSources() {
 // Sync operations
 // ---------------------------------------------------------------------------
 
-async function syncCharts({ country = 'us' } = {}) {
-  const url = `https://rss.applemarketingtools.com/api/v2/${country}/music/most-played/100/albums.json`;
-  const feed = await fetchJson(url, { attempts: 2 });
-  const results = (feed.feed && feed.feed.results) || [];
-  const total = results.length || 1;
-  let persisted = 0;
+// Apple Marketing RSS is published per storefront. A US-only feed leaves most
+// K-POP rows without a real rank, so we merge the configured storefronts and
+// keep each album's best (highest) rank. One dead storefront never blocks the
+// rest of the snapshot.
+function chartFeedUrl(country) {
+  return `https://rss.applemarketingtools.com/api/v2/${country}/music/most-played/100/albums.json`;
+}
 
-  for (let index = 0; index < results.length; index += 1) {
-    const item = results[index];
-    if (!item.id) continue;
-    const popularity = Math.round(((total - index) / total) * 1000) / 10;
-    const album = {
-      provider: 'itunes',
-      providerId: String(item.id),
-      title: item.name,
-      artistDisplay: item.artistName,
-      artistRefs: item.artistId
-        ? [N.normalizeArtistRef('itunes', item.artistId, item.artistName)]
-        : [],
-      kind: N.kindForAlbum(null, item.name),
-      coverUrl: itunes.artworkAt(item.artworkUrl100, 900),
-      releaseDate: item.releaseDate || null,
-      genre: item.genres && item.genres[0] ? item.genres[0].name : null,
-      trackCount: null,
-      popularity,
-      chartSource: `apple-rss:${country}`,
-      externalUrl: item.url || null,
-      description: null
-    };
+function chartEntry(item, index, total, country) {
+  const popularity = Math.round(((total - index) / total) * 1000) / 10;
+  return {
+    provider: 'itunes',
+    providerId: String(item.id),
+    title: item.name,
+    artistDisplay: item.artistName,
+    artistRefs: item.artistId
+      ? [N.normalizeArtistRef('itunes', item.artistId, item.artistName)]
+      : [],
+    kind: N.kindForAlbum(null, item.name),
+    coverUrl: itunes.artworkAt(item.artworkUrl100, 900),
+    releaseDate: item.releaseDate || null,
+    genre: item.genres && item.genres[0] ? item.genres[0].name : null,
+    trackCount: null,
+    popularity,
+    chartSource: `apple-rss:${country}`,
+    externalUrl: item.url || null,
+    description: null
+  };
+}
+
+// Maps one storefront feed to entries: index 0 is the #1 album, so the top of
+// the feed scores 100 and the tail of a 100-row feed scores 1.
+function chartEntriesForFeed(storefront, results) {
+  const total = results.length || 1;
+  return results.filter((item) => item && item.id).map((item, index) => chartEntry(item, index, total, storefront));
+}
+
+// Pure merge of several storefront feeds. Duplicates keep the better (higher)
+// rank, which is what makes a cross-storefront chart possible.
+function mergeChartFeeds(feeds) {
+  const merged = new Map();
+  for (const feed of feeds || []) {
+    for (const entry of chartEntriesForFeed(feed.storefront, feed.results || [])) {
+      const seen = merged.get(entry.providerId);
+      if (!seen || entry.popularity > seen.popularity) merged.set(entry.providerId, entry);
+    }
+  }
+  return merged;
+}
+
+async function syncCharts({ country, countries } = {}) {
+  const requested = countries && countries.length ? countries : country ? [country] : config.chartStorefronts;
+  const storefronts = requested.map((code) => String(code).trim().toLowerCase()).filter(Boolean);
+  const merged = new Map();
+  const failed = [];
+
+  for (const storefront of storefronts) {
+    try {
+      const feed = await fetchJson(chartFeedUrl(storefront), { attempts: 2 });
+      const results = (feed.feed && feed.feed.results) || [];
+      for (const entry of chartEntriesForFeed(storefront, results)) {
+        const seen = merged.get(entry.providerId);
+        if (!seen || entry.popularity > seen.popularity) merged.set(entry.providerId, entry);
+      }
+    } catch (error) {
+      failed.push(storefront);
+      log.warn(`chart storefront ${storefront} failed: ${error.message}`);
+    }
+  }
+
+  let persisted = 0;
+  for (const album of merged.values()) {
     try {
       repo.persistAlbum(album, []);
       precache(album.coverUrl);
@@ -142,7 +185,7 @@ async function syncCharts({ country = 'us' } = {}) {
     }
   }
   drainWarmQueue();
-  return { country, fetched: results.length, persisted };
+  return { storefronts, failed, fetched: merged.size, persisted };
 }
 
 async function syncReleases({ windowDays = 90, perSeed = 20 } = {}) {
@@ -358,6 +401,10 @@ module.exports = {
   runJob,
   executeJob,
   syncCharts,
+  chartFeedUrl,
+  chartEntry,
+  chartEntriesForFeed,
+  mergeChartFeeds,
   syncReleases,
   syncArtistProfile,
   syncAlbum,

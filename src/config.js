@@ -46,6 +46,10 @@ module.exports = {
   schedulerEnabled: bool(env.HIPKOP_SCHEDULER, true),
   dailySyncHour: Math.min(23, Math.max(0, Number(env.HIPKOP_DAILY_SYNC_HOUR || 4))),
   chartGenres: list(env.HIPKOP_CHART_GENRES, 'rap,kpop'),
+  // Apple Marketing RSS is per-storefront: 'us' carries most HipHop releases
+  // while 'kr' / 'jp' carry the K-POP catalogue. Merging a few storefronts is
+  // what gives every chart row a real rank instead of a null popularity.
+  chartStorefronts: list(env.HIPKOP_CHART_STOREFRONTS, 'us,kr,jp'),
   seedArtists: list(
     env.HIPKOP_SEED_ARTISTS,
     'aespa,BLACKPINK,G-DRAGON,法老,PACT,A$AP Rocky,Higher Brothers,Red Velvet,连麻,Kendrick Lamar,Travis Scott,NewJeans'
