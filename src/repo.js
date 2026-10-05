@@ -5,8 +5,37 @@
 
 const { run, get, all, transaction, nowIso, json } = require('./db');
 const N = require('./normalize');
+const T = require('./taxonomy');
 
 const n = (value) => (value === undefined ? null : value);
+
+// 'unknown' is the taxonomy's "we don't know" value. Store it as NULL so that
+// COALESCE/upsert can never let an unknown overwrite a real value.
+const storeBucket = (bucket) => (bucket && bucket !== 'unknown' ? bucket : null);
+const storeScene = (scene) => (scene && scene !== 'unknown' ? scene : null);
+
+// Provider ids that were synthesised locally (name:/title: prefixes) are not
+// real upstream identifiers and must never be written to album_aliases.
+const providerIdLooksReal = (value) =>
+  Boolean(value) && !String(value).startsWith('name:') && !String(value).startsWith('title:');
+
+// iTunes exposes one album under several storefront ids (US/KR/CN ...). An alias
+// row records "this provider id folded into that canonical album" so a later
+// sync updates the canonical row instead of resurrecting a duplicate.
+const albumAlias = (provider, providerAlbumId) =>
+  providerAlbumId
+    ? get(`SELECT album_id AS albumId FROM album_aliases WHERE provider = ? AND provider_album_id = ?`, [
+        provider, String(providerAlbumId)
+      ])
+    : null;
+
+const setAlbumAlias = (provider, providerAlbumId, albumId) =>
+  run(
+    `INSERT INTO album_aliases (provider, provider_album_id, album_id, created_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(provider, provider_album_id) DO UPDATE SET album_id = excluded.album_id`,
+    [provider, String(providerAlbumId), albumId, nowIso()]
+  );
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -45,13 +74,17 @@ function artistRow(entity) {
     entity.providerId !== undefined && entity.providerId !== null && entity.providerId !== ''
       ? String(entity.providerId)
       : `name:${N.slugify(entity.name)}`;
+  const name = N.cleanText(entity.name, 200) || 'Unknown Artist';
+  const genreBucket = storeBucket(entity.genreBucket || T.genreBucket(entity.genre));
   return {
     id: entity.id || N.artistId(entity.provider, providerId, entity.name),
     provider: entity.provider,
     providerArtistId: providerId,
-    name: N.cleanText(entity.name, 200) || 'Unknown Artist',
+    name,
     sortName: n(entity.sortName),
     genre: n(entity.genre),
+    genreBucket,
+    scene: storeScene(n(entity.scene) || T.sceneFor(name, entity.genreBucket || T.genreBucket(entity.genre))),
     region: n(entity.region),
     bio: n(entity.bio),
     avatarUrl: n(entity.avatarUrl),
@@ -67,13 +100,16 @@ function artistRow(entity) {
 function upsertArtist(entity) {
   const a = artistRow(entity);
   run(
-    `INSERT INTO artists (id, provider, provider_artist_id, name, sort_name, genre, region, bio,
-        avatar_url, avatar_source, hero_url, external_url, popularity, synced_at, sync_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
+    `INSERT INTO artists (id, provider, provider_artist_id, name, sort_name, genre, genre_bucket, scene,
+        region, bio, avatar_url, avatar_source, hero_url, external_url, popularity,
+        synced_at, sync_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        sort_name = COALESCE(excluded.sort_name, artists.sort_name),
        genre = COALESCE(excluded.genre, artists.genre),
+       genre_bucket = COALESCE(excluded.genre_bucket, artists.genre_bucket),
+       scene = COALESCE(excluded.scene, artists.scene),
        region = COALESCE(excluded.region, artists.region),
        bio = COALESCE(excluded.bio, artists.bio),
        avatar_url = COALESCE(excluded.avatar_url, artists.avatar_url),
@@ -86,8 +122,9 @@ function upsertArtist(entity) {
        sync_error = NULL,
        updated_at = excluded.updated_at`,
     [
-      a.id, a.provider, a.providerArtistId, a.name, a.sortName, a.genre, a.region, a.bio,
-      a.avatarUrl, a.avatarSource, a.heroUrl, a.externalUrl, a.popularity, a.syncedAt, a.now, a.now
+      a.id, a.provider, a.providerArtistId, a.name, a.sortName, a.genre, a.genreBucket, a.scene,
+      a.region, a.bio, a.avatarUrl, a.avatarSource, a.heroUrl, a.externalUrl, a.popularity,
+      a.syncedAt, a.now, a.now
     ]
   );
   return a.id;
@@ -103,13 +140,7 @@ function ensureArtistRef(ref) {
   const id = N.artistId(ref.provider, providerId, ref.name);
   const exists = get(`SELECT id FROM artists WHERE id = ?`, [id]);
   if (!exists) {
-    upsertArtist({
-      id,
-      provider: ref.provider,
-      providerId,
-      name: ref.name,
-      popularity: null
-    });
+    upsertArtist({ id, provider: ref.provider, providerId, name: ref.name, popularity: null });
   }
   return id;
 }
@@ -129,17 +160,22 @@ function albumRow(entity) {
     entity.providerId !== undefined && entity.providerId !== null && entity.providerId !== ''
       ? String(entity.providerId)
       : `title:${N.slugify(entity.title)}`;
-  const id = entity.id || N.albumId(entity.provider, providerId, entity.title);
+  const alias = entity.id ? null : albumAlias(entity.provider, providerId);
+  const id = entity.id || (alias && alias.albumId) || N.albumId(entity.provider, providerId, entity.title);
+  const genreBucket = storeBucket(entity.genreBucket || T.genreBucket(entity.genre));
+  const artistDisplay = n(entity.artistDisplay);
   return {
     id,
     provider: entity.provider,
     providerAlbumId: providerId,
     kind: entity.kind === 'single' ? 'single' : 'album',
     title: N.cleanText(entity.title, 300) || 'Untitled',
-    artistDisplay: n(entity.artistDisplay),
+    artistDisplay,
     coverUrl: n(entity.coverUrl),
     releaseDate: n(entity.releaseDate),
     genre: n(entity.genre),
+    genreBucket,
+    scene: storeScene(n(entity.scene) || T.sceneFor(artistDisplay, T.genreBucket(entity.genre))),
     trackCount: n(entity.trackCount),
     score: n(entity.score) ?? N.editorialScore(id),
     popularity: n(entity.popularity),
@@ -147,6 +183,9 @@ function albumRow(entity) {
     description: n(entity.description),
     externalUrl: n(entity.externalUrl),
     chartSource: n(entity.chartSource),
+    qqAlbumMid: n(entity.qqAlbumMid),
+    qqListenSongMid: n(entity.qqListenSongMid),
+    neteaseAlbumId: n(entity.neteaseAlbumId),
     syncedAt: n(entity.syncedAt) || now,
     now
   };
@@ -156,9 +195,10 @@ function upsertAlbum(entity) {
   const a = albumRow(entity);
   run(
     `INSERT INTO albums (id, provider, provider_album_id, kind, title, artist_display, cover_url,
-        release_date, genre, track_count, score, popularity, comments, description, external_url,
-        chart_source, synced_at, sync_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
+        release_date, genre, genre_bucket, scene, track_count, score, popularity, comments,
+        description, external_url, chart_source, qq_album_mid, qq_listen_song_mid, netease_album_id,
+        synced_at, sync_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind,
        title = excluded.title,
@@ -166,22 +206,31 @@ function upsertAlbum(entity) {
        cover_url = COALESCE(excluded.cover_url, albums.cover_url),
        release_date = COALESCE(excluded.release_date, albums.release_date),
        genre = COALESCE(excluded.genre, albums.genre),
+       genre_bucket = COALESCE(excluded.genre_bucket, albums.genre_bucket),
+       scene = COALESCE(excluded.scene, albums.scene),
        track_count = COALESCE(excluded.track_count, albums.track_count),
        score = COALESCE(excluded.score, albums.score),
        popularity = COALESCE(excluded.popularity, albums.popularity),
        description = COALESCE(excluded.description, albums.description),
        external_url = COALESCE(excluded.external_url, albums.external_url),
        chart_source = COALESCE(excluded.chart_source, albums.chart_source),
+       qq_album_mid = COALESCE(excluded.qq_album_mid, albums.qq_album_mid),
+       qq_listen_song_mid = COALESCE(excluded.qq_listen_song_mid, albums.qq_listen_song_mid),
+       netease_album_id = COALESCE(excluded.netease_album_id, albums.netease_album_id),
        synced_at = excluded.synced_at,
        sync_status = 'ok',
        sync_error = NULL,
        updated_at = excluded.updated_at`,
     [
       a.id, a.provider, a.providerAlbumId, a.kind, a.title, a.artistDisplay, a.coverUrl,
-      a.releaseDate, a.genre, a.trackCount, a.score, a.popularity, a.comments, a.description,
-      a.externalUrl, a.chartSource, a.syncedAt, a.now, a.now
+      a.releaseDate, a.genre, a.genreBucket, a.scene, a.trackCount, a.score, a.popularity,
+      a.comments, a.description, a.externalUrl, a.chartSource, a.qqAlbumMid, a.qqListenSongMid,
+      a.neteaseAlbumId, a.syncedAt, a.now, a.now
     ]
   );
+  if (providerIdLooksReal(a.providerAlbumId) && a.id !== N.albumId(a.provider, a.providerAlbumId, a.title)) {
+    setAlbumAlias(a.provider, a.providerAlbumId, a.id);
+  }
   return a.id;
 }
 
@@ -191,7 +240,8 @@ function ensureAlbumRef(ref) {
     ref.providerId !== undefined && ref.providerId !== null && ref.providerId !== ''
       ? String(ref.providerId)
       : `title:${N.slugify(ref.title)}`;
-  const id = N.albumId(ref.provider, providerId, ref.title);
+  const alias = albumAlias(ref.provider, providerId);
+  const id = (alias && alias.albumId) || N.albumId(ref.provider, providerId, ref.title);
   const exists = get(`SELECT id FROM albums WHERE id = ?`, [id]);
   if (!exists) {
     upsertAlbum({
@@ -200,10 +250,15 @@ function ensureAlbumRef(ref) {
       providerId,
       title: ref.title,
       kind: N.kindForAlbum(null, ref.title),
+      artistDisplay: ref.artistDisplay || null,
       coverUrl: ref.coverUrl || null,
       releaseDate: ref.releaseDate || null,
       genre: ref.genre || null
     });
+    if (ref.artistDisplay) {
+      const artistId = ensureArtistRef({ provider: ref.provider, providerId: null, name: ref.artistDisplay });
+      if (artistId) linkAlbumArtist(id, artistId, 'main', 0);
+    }
   }
   return id;
 }
@@ -225,13 +280,19 @@ function upsertTrack(entity) {
       : `title:${N.slugify(entity.title)}`;
   const id = entity.id || N.trackId(entity.provider, providerId, entity.title);
   let albumId = entity.albumId || null;
-  if (!albumId && entity.albumRef) albumId = ensureAlbumRef(entity.albumRef);
+  if (!albumId && entity.albumRef) {
+    albumId = ensureAlbumRef({
+      ...entity.albumRef,
+      artistDisplay: entity.albumRef.artistDisplay || entity.artistDisplay
+    });
+  }
+  const genreBucket = storeBucket(entity.genreBucket || T.genreBucket(entity.genre));
 
   run(
     `INSERT INTO tracks (id, provider, provider_track_id, title, album_id, artist_display,
-        track_number, disc_number, duration_ms, preview_url, release_date, genre, popularity,
-        synced_at, sync_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
+        track_number, disc_number, duration_ms, preview_url, release_date, genre, genre_bucket,
+        popularity, qq_song_mid, netease_song_id, synced_at, sync_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        title = excluded.title,
        album_id = COALESCE(excluded.album_id, tracks.album_id),
@@ -242,7 +303,10 @@ function upsertTrack(entity) {
        preview_url = COALESCE(excluded.preview_url, tracks.preview_url),
        release_date = COALESCE(excluded.release_date, tracks.release_date),
        genre = COALESCE(excluded.genre, tracks.genre),
+       genre_bucket = COALESCE(excluded.genre_bucket, tracks.genre_bucket),
        popularity = COALESCE(excluded.popularity, tracks.popularity),
+       qq_song_mid = COALESCE(excluded.qq_song_mid, tracks.qq_song_mid),
+       netease_song_id = COALESCE(excluded.netease_song_id, tracks.netease_song_id),
        synced_at = excluded.synced_at,
        sync_status = 'ok',
        sync_error = NULL,
@@ -250,13 +314,26 @@ function upsertTrack(entity) {
     [
       id, entity.provider, providerId, N.cleanText(entity.title, 300) || 'Untitled', albumId,
       n(entity.artistDisplay), n(entity.trackNumber), n(entity.discNumber), n(entity.durationMs),
-      n(entity.previewUrl), n(entity.releaseDate), n(entity.genre), n(entity.popularity), now, now, now
+      n(entity.previewUrl), n(entity.releaseDate), n(entity.genre), genreBucket, n(entity.popularity),
+      n(entity.qqSongMid), n(entity.neteaseSongId), now, now, now
     ]
   );
 
   for (const ref of entity.artistRefs || []) {
     const artistId = ensureArtistRef(ref);
     if (artistId) linkTrackArtist(id, artistId, ref.role || 'main', ref.position || 0);
+  }
+
+  if (albumId) {
+    const hasArtist = get(`SELECT 1 AS ok FROM album_artists WHERE album_id = ? LIMIT 1`, [albumId]);
+    if (!hasArtist) {
+      const main = (entity.artistRefs || [])[0];
+      const artistId = main ? ensureArtistRef(main) : null;
+      if (artistId) {
+        linkAlbumArtist(albumId, artistId, 'main', 0);
+        refreshAlbumArtistDisplay(albumId);
+      }
+    }
   }
   return id;
 }
@@ -277,6 +354,28 @@ function linkTrackArtist(trackId, artistId, role = 'main', position = 0) {
   );
 }
 
+// Keep a denormalised artist_display in sync with the relation table so list
+// views and detail views never disagree about who made the album.
+function refreshAlbumArtistDisplay(albumId) {
+  const artists = albumArtists(albumId);
+  if (!artists.length) return;
+  const mains = artists.filter((a) => a.role !== 'featured');
+  const display = (mains.length ? mains : artists).map((a) => a.name).join(' / ');
+  run(`UPDATE albums SET artist_display = ?, updated_at = ? WHERE id = ? AND (artist_display IS NULL OR artist_display <> ?)`, [
+    display, nowIso(), albumId, display
+  ]);
+}
+
+function refreshTrackArtistDisplay(trackId) {
+  const artists = trackArtists(trackId);
+  if (!artists.length) return;
+  const mains = artists.filter((a) => a.role !== 'featured');
+  const display = (mains.length ? mains : artists).map((a) => a.name).join(' / ');
+  run(`UPDATE tracks SET artist_display = ?, updated_at = ? WHERE id = ? AND (artist_display IS NULL OR artist_display <> ?)`, [
+    display, nowIso(), trackId, display
+  ]);
+}
+
 // Persist a fully-normalised album payload (optionally with its tracks).
 function persistAlbum(entity, tracks = []) {
   return transaction(() => {
@@ -293,8 +392,23 @@ function persistAlbum(entity, tracks = []) {
         tracks.length, albumId
       ]);
     }
+    refreshAlbumArtistDisplay(albumId);
+    applyAlbumScene(albumId);
     return albumId;
   });
+}
+
+// Album "scene" follows its primary artist (mainstream vs underground curation).
+function applyAlbumScene(albumId) {
+  const row = get(
+    `SELECT ar.scene AS scene FROM album_artists aa
+     JOIN artists ar ON ar.id = aa.artist_id WHERE aa.album_id = ?
+     ORDER BY aa.position, ar.name LIMIT 1`,
+    [albumId]
+  );
+  const scene = row ? storeScene(row.scene) : null;
+  if (!scene) return;
+  run(`UPDATE albums SET scene = COALESCE(?, scene), updated_at = ? WHERE id = ?`, [scene, nowIso(), albumId]);
 }
 
 const persistArtist = (entity) => upsertArtist(entity);
@@ -304,15 +418,18 @@ const persistArtist = (entity) => upsertArtist(entity);
 // ---------------------------------------------------------------------------
 
 const ARTIST_COLUMNS = `id, provider, provider_artist_id AS providerId, name, sort_name AS sortName,
-  genre, region, bio, avatar_url AS avatarUrl, avatar_source AS avatarSource, hero_url AS heroUrl,
-  external_url AS externalUrl, popularity, synced_at AS syncedAt, sync_status AS syncStatus,
-  sync_error AS syncError, created_at AS createdAt, updated_at AS updatedAt`;
+  genre, genre_bucket AS genreBucket, scene, region, bio, avatar_url AS avatarUrl,
+  avatar_source AS avatarSource, hero_url AS heroUrl, external_url AS externalUrl, popularity,
+  synced_at AS syncedAt, sync_status AS syncStatus, sync_error AS syncError,
+  created_at AS createdAt, updated_at AS updatedAt`;
 
 const ALBUM_COLUMNS = `al.id, al.provider, al.provider_album_id AS providerId, al.kind, al.title,
   al.artist_display AS artistDisplay, al.cover_url AS coverUrl, al.release_date AS releaseDate,
-  al.genre, al.track_count AS trackCount, al.score, al.popularity, al.comments,
-  al.description, al.external_url AS externalUrl, al.synced_at AS syncedAt,
-  al.sync_status AS syncStatus, al.sync_error AS syncError,
+  al.genre, al.genre_bucket AS genreBucket, al.scene, al.track_count AS trackCount,
+  al.score, al.popularity, al.comments, al.description, al.external_url AS externalUrl,
+  al.chart_source AS chartSource, al.qq_album_mid AS qqAlbumMid, al.qq_listen_song_mid AS qqListenSongMid,
+  al.netease_album_id AS neteaseAlbumId, al.synced_at AS syncedAt, al.sync_status AS syncStatus,
+  al.sync_error AS syncError,
   (SELECT ar.id FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
      WHERE aa.album_id = al.id ORDER BY aa.position, ar.name LIMIT 1) AS primaryArtistId,
   (SELECT ar.name FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
@@ -321,8 +438,9 @@ const ALBUM_COLUMNS = `al.id, al.provider, al.provider_album_id AS providerId, a
 const TRACK_COLUMNS = `t.id, t.provider, t.provider_track_id AS providerId, t.title,
   t.album_id AS albumId, t.artist_display AS artistDisplay, t.track_number AS trackNumber,
   t.disc_number AS discNumber, t.duration_ms AS durationMs, t.preview_url AS previewUrl,
-  t.release_date AS releaseDate, t.genre, t.popularity, t.synced_at AS syncedAt,
-  t.sync_status AS syncStatus, t.sync_error AS syncError`;
+  t.release_date AS releaseDate, t.genre, t.genre_bucket AS genreBucket, t.popularity,
+  t.qq_song_mid AS qqSongMid, t.netease_song_id AS neteaseSongId,
+  t.synced_at AS syncedAt, t.sync_status AS syncStatus, t.sync_error AS syncError`;
 
 const getArtistRow = (id) => get(`SELECT ${ARTIST_COLUMNS} FROM artists WHERE id = ?`, [id]);
 const getAlbumRow = (id) => get(`SELECT ${ALBUM_COLUMNS} FROM albums al WHERE al.id = ?`, [id]);
@@ -378,10 +496,7 @@ function getArtistBundle(id) {
 function getAlbumBundle(id) {
   const album = getAlbumRow(id);
   if (!album) return null;
-  const tracks = albumTracks(id).map((track) => ({
-    ...track,
-    artists: trackArtists(track.id)
-  }));
+  const tracks = albumTracks(id).map((track) => ({ ...track, artists: trackArtists(track.id) }));
   return { album, artists: albumArtists(id), tracks };
 }
 
@@ -420,42 +535,63 @@ function searchLocal(query, { limit = 20 } = {}) {
   return { artists, albums, tracks };
 }
 
-const GENRE_FILTERS = {
-  rap: `(al.genre LIKE '%rap%' OR al.genre LIKE '%hip-hop%' OR al.genre LIKE '%hip hop%')`,
-  kpop: `(al.genre LIKE '%k-pop%' OR al.genre LIKE '%kpop%')`,
-  hiphop: `(al.genre LIKE '%rap%' OR al.genre LIKE '%hip-hop%')`
+const artistBucketExists = (bucket) =>
+  `EXISTS (SELECT 1 FROM album_artists aa JOIN artists ar ON ar.id = aa.artist_id
+            WHERE aa.album_id = al.id AND ar.genre_bucket = '${bucket}')`;
+
+// A K-POP act's album can be tagged "Hip-Hop/Rap" upstream and a rapper's
+// project can be tagged "Pop". Rather than lose those rows from the cross-genre
+// tabs, match on the album's own bucket OR its primary artist's bucket.
+const BUCKET_FILTERS = {
+  kpop: `(al.genre_bucket = 'kpop' OR ${artistBucketExists('kpop')})`,
+  hiphop: `(al.genre_bucket = 'hiphop' OR ${artistBucketExists('hiphop')})`,
+  rap: `(al.genre_bucket = 'hiphop' OR ${artistBucketExists('hiphop')})`,
+  other: `(al.genre_bucket = 'other' OR ${artistBucketExists('other')})`
 };
 
-function listReleases({ from = null, to = null, limit = 30 } = {}) {
+const SCENE_FILTERS = { mainstream: `al.scene = 'mainstream'`, underground: `al.scene = 'underground'` };
+
+function albumWhere({ bucket, scene, genre, from, to, year } = {}) {
   const clauses = [];
   const params = [];
+  if (BUCKET_FILTERS[bucket]) clauses.push(BUCKET_FILTERS[bucket]);
+  if (SCENE_FILTERS[scene]) clauses.push(SCENE_FILTERS[scene]);
+  if (genre && !BUCKET_FILTERS[genre]) {
+    clauses.push(`(al.genre LIKE ? ESCAPE '\\' OR al.genre LIKE ? ESCAPE '\\')`);
+    params.push(`%${escapeLike(genre)}%`, `%${escapeLike(genre)}%`);
+  }
   if (from) { clauses.push('al.release_date >= ?'); params.push(from); }
   if (to) { clauses.push('al.release_date <= ?'); params.push(to); }
-  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  if (year) { clauses.push('al.release_date LIKE ?'); params.push(`${year}-%`); }
+  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+}
+
+const ORDER_BY = {
+  popularity: 'COALESCE(al.popularity, -1) DESC, al.score DESC, al.release_date DESC',
+  score: 'al.score DESC, al.release_date DESC',
+  date: 'al.release_date DESC NULLS LAST, al.score DESC',
+  title: 'al.title ASC'
+};
+
+function listAlbumsBrowse({ bucket, scene, genre, from, to, year, sort = 'date', limit = 40 } = {}) {
+  const { where, params } = albumWhere({ bucket, scene, genre, from, to, year });
   params.push(limit);
   return all(
-    `SELECT ${ALBUM_COLUMNS} FROM albums al ${where}
-     ORDER BY al.release_date DESC NULLS LAST, al.score DESC LIMIT ?`,
+    `SELECT ${ALBUM_COLUMNS} FROM albums al ${where} ORDER BY ${ORDER_BY[sort] || ORDER_BY.date} LIMIT ?`,
     params
   );
 }
 
-function listCharts({ genre = 'all', sort = 'popularity', limit = 50 } = {}) {
-  const params = [];
-  let where = '';
-  const filter = GENRE_FILTERS[genre];
-  if (filter) {
-    where = `WHERE ${filter}`;
-  }
-  const order =
-    sort === 'score'
-      ? 'al.score DESC, al.release_date DESC'
-      : sort === 'date'
-        ? 'al.release_date DESC NULLS LAST'
-        : 'COALESCE(al.popularity, -1) DESC, al.score DESC, al.release_date DESC';
-  params.push(limit);
-  return all(`SELECT ${ALBUM_COLUMNS} FROM albums al ${where} ORDER BY ${order} LIMIT ?`, params);
-}
+const listReleases = ({ from = null, to = null, bucket = null, scene = null, limit = 30 } = {}) =>
+  listAlbumsBrowse({ from, to, bucket, scene, sort: 'date', limit });
+
+const listCharts = ({ genre = 'all', scene = 'all', sort = 'popularity', limit = 50 } = {}) =>
+  listAlbumsBrowse({
+    bucket: genre === 'all' ? null : genre,
+    scene: scene === 'all' ? null : scene,
+    sort,
+    limit
+  });
 
 const staleArtists = (sinceIso, limit = 25) =>
   all(
@@ -465,14 +601,89 @@ const staleArtists = (sinceIso, limit = 25) =>
     [sinceIso, limit]
   );
 
+const categoryCounts = () => ({
+  buckets: all(
+    `SELECT COALESCE(genre_bucket, 'unknown') AS bucket, COUNT(*) AS count FROM albums GROUP BY genre_bucket`
+  ),
+  scenes: all(
+    `SELECT COALESCE(scene, 'unknown') AS scene, COUNT(*) AS count FROM albums GROUP BY scene`
+  ),
+  artistScenes: all(
+    `SELECT COALESCE(scene, 'unknown') AS scene, COUNT(*) AS count FROM artists GROUP BY scene`
+  )
+});
+
+// What a maintainer would want to see after a sync: rows that still disagree.
+const consistencyReport = () => ({
+  albumsMissingCover: get(`SELECT COUNT(*) AS c FROM albums WHERE cover_url IS NULL OR cover_url = ''`).c,
+  albumsMissingReleaseDate: get(`SELECT COUNT(*) AS c FROM albums WHERE release_date IS NULL OR release_date = ''`).c,
+  albumsWithoutArtist: get(`SELECT COUNT(*) AS c FROM albums al WHERE NOT EXISTS (SELECT 1 FROM album_artists aa WHERE aa.album_id = al.id)`).c,
+  tracksWithoutAlbum: get(`SELECT COUNT(*) AS c FROM tracks WHERE album_id IS NULL`).c,
+  tracksMissingArtist: get(`SELECT COUNT(*) AS c FROM tracks t WHERE t.artist_display IS NULL AND NOT EXISTS (SELECT 1 FROM track_artists ta WHERE ta.track_id = t.id)`).c,
+  stubArtists: get(`SELECT COUNT(*) AS c FROM artists WHERE provider_artist_id LIKE 'name:%'`).c,
+  stubAlbums: get(`SELECT COUNT(*) AS c FROM albums WHERE provider_album_id LIKE 'title:%'`).c,
+  duplicateArtists: get(
+    `SELECT COUNT(*) AS c FROM (SELECT provider, lower(name) AS n FROM artists GROUP BY provider, lower(name) HAVING COUNT(*) > 1)`
+  ).c,
+  duplicateTracks: get(
+    `SELECT COUNT(*) AS c FROM (SELECT album_id, lower(title) AS t, COALESCE(disc_number,-1) AS d,
+       COALESCE(track_number,-1) AS n FROM tracks WHERE album_id IS NOT NULL
+       GROUP BY album_id, lower(title), COALESCE(disc_number,-1), COALESCE(track_number,-1) HAVING COUNT(*) > 1)`
+  ).c,
+  duplicateAlbums: get(
+    `SELECT COUNT(*) AS c FROM (SELECT provider, lower(title) AS t, COALESCE(artist_display,'') AS a FROM albums GROUP BY provider, lower(title), COALESCE(artist_display,'') HAVING COUNT(*) > 1)`
+  ).c
+});
+
 const stats = () => ({
   artists: get(`SELECT COUNT(*) AS c FROM artists`).c,
   albums: get(`SELECT COUNT(*) AS c FROM albums`).c,
   tracks: get(`SELECT COUNT(*) AS c FROM tracks`).c,
   sources: get(`SELECT COUNT(*) AS c FROM metadata_sources`).c,
+  posts: get(`SELECT COUNT(*) AS c FROM community_posts`).c,
   pendingJobs: get(`SELECT COUNT(*) AS c FROM sync_jobs WHERE status IN ('pending','running')`).c,
   cachedCovers: get(`SELECT COUNT(*) AS c FROM cover_cache WHERE status = 'ready'`).c
 });
+
+// ---------------------------------------------------------------------------
+// Community
+// ---------------------------------------------------------------------------
+
+const listPosts = ({ topic = null, limit = 30 } = {}) =>
+  all(
+    `SELECT p.id, p.topic, p.title, p.body, p.author, p.album_id AS albumId, p.artist_id AS artistId,
+       p.likes, p.created_at AS createdAt,
+       al.title AS albumTitle, al.artist_display AS albumArtist,
+       ar.name AS artistName
+     FROM community_posts p
+     LEFT JOIN albums al ON al.id = p.album_id
+     LEFT JOIN artists ar ON ar.id = p.artist_id
+     ${topic && topic !== 'all' ? 'WHERE p.topic = ?' : ''}
+     ORDER BY p.created_at DESC LIMIT ?`,
+    topic && topic !== 'all' ? [topic, limit] : [limit]
+  );
+
+const countPosts = () => get(`SELECT COUNT(*) AS c FROM community_posts`).c;
+
+function createPost({ topic = 'general', title, body, author = 'HIPKOP 社区', albumId = null, artistId = null }) {
+  const now = nowIso();
+  const info = run(
+    `INSERT INTO community_posts (topic, title, body, author, album_id, artist_id, likes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    [topic, title, body, author, albumId, artistId, now, now]
+  );
+  return Number(info.lastInsertRowid || 0);
+}
+
+function seedPostsIfEmpty(posts) {
+  if (countPosts() > 0) return 0;
+  let created = 0;
+  for (const post of posts) {
+    createPost(post);
+    created += 1;
+  }
+  return created;
+}
 
 // ---------------------------------------------------------------------------
 // Cover cache
@@ -574,7 +785,12 @@ module.exports = {
   persistArtist,
   upsertAlbum,
   ensureAlbumRef,
+  albumAlias,
+  setAlbumAlias,
   persistAlbum,
+  refreshAlbumArtistDisplay,
+  refreshTrackArtistDisplay,
+  applyAlbumScene,
   setAlbumSyncError,
   upsertTrack,
   linkAlbumArtist,
@@ -593,8 +809,15 @@ module.exports = {
   searchLocal,
   listReleases,
   listCharts,
+  listAlbumsBrowse,
+  categoryCounts,
+  consistencyReport,
   staleArtists,
   stats,
+  listPosts,
+  createPost,
+  countPosts,
+  seedPostsIfEmpty,
   getCover,
   beginCover,
   completeCover,

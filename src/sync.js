@@ -14,10 +14,26 @@ const repo = require('./repo');
 const providers = require('./providers');
 const media = require('./media');
 const search = require('./search');
+const { calibrate } = require('./calibrate');
 const N = require('./normalize');
 const { fetchJson } = require('./util/http');
 const log = require('./util/logger')('sync');
 const itunes = require('./providers/itunes');
+
+// Reconciliation is cheap relative to a sync and keeps the catalog honest.
+function runCalibration() {
+  try {
+    const report = calibrate();
+    log.info(
+      `calibration: merged ${report.mergedArtists} artist(s) / ${report.mergedAlbums} album(s), ` +
+        `${report.artwork} artwork, ${report.coverJobs} cover job(s)`
+    );
+    return report;
+  } catch (error) {
+    log.warn(`calibration failed: ${error.message}`);
+    return null;
+  }
+}
 
 const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
@@ -253,14 +269,24 @@ async function runJob(job) {
       return syncSearch(job.target);
     case 'artist-refresh':
       return refreshStaleArtists(payload);
+    case 'calibrate':
+      return runCalibration();
     default:
       throw new Error(`unknown_job_type:${job.type}`);
   }
 }
 
 async function afterJob(job) {
-  if (job.type === 'releases') scheduleRecurring('releases', DAY, { bootstrapDelayMs: nextDailyAt(config.dailySyncHour) - Date.now() });
-  if (job.type === 'charts') scheduleRecurring('charts', 7 * DAY, { bootstrapDelayMs: 7 * DAY });
+  if (job.type === 'releases') {
+    scheduleRecurring('releases', DAY, { bootstrapDelayMs: nextDailyAt(config.dailySyncHour) - Date.now() });
+    runCalibration();
+  }
+  if (job.type === 'charts') {
+    scheduleRecurring('charts', 7 * DAY, { bootstrapDelayMs: 7 * DAY });
+    runCalibration();
+  }
+  if (job.type === 'artist-refresh') runCalibration();
+  if (job.type === 'calibrate') scheduleRecurring('calibrate', DAY, { bootstrapDelayMs: 12 * HOUR });
 }
 
 async function executeJob(job) {
@@ -305,6 +331,7 @@ function bootstrapSchedule() {
   scheduleRecurring('releases', DAY, { bootstrapDelayMs: Math.max(1500, nextDailyAt(config.dailySyncHour) - Date.now()) });
   scheduleRecurring('charts', 7 * DAY, { bootstrapDelayMs: 1500 });
   scheduleRecurring('artist-refresh', DAY, { bootstrapDelayMs: 20 * 1000 });
+  scheduleRecurring('calibrate', DAY, { bootstrapDelayMs: 40 * 1000 });
 }
 
 async function syncOnce({ withCharts = true } = {}) {
@@ -318,6 +345,7 @@ async function syncOnce({ withCharts = true } = {}) {
 
 module.exports = {
   registerSources,
+  runCalibration,
   scheduleRecurring,
   bootstrapSchedule,
   processDueJobs,

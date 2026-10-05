@@ -9,13 +9,29 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const config = require('./config');
-const schema = require('./schema');
+const { SCHEMA, MIGRATIONS } = require('./schema');
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 fs.mkdirSync(config.mediaDir, { recursive: true });
 
 const db = new DatabaseSync(config.dbPath);
-db.exec(schema);
+db.exec(SCHEMA);
+
+// CREATE TABLE IF NOT EXISTS never adds columns to an existing table, so apply
+// additive migrations explicitly. Safe to run on every boot.
+const tableColumns = (table) => {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+  return new Set(rows.map((row) => row.name));
+};
+
+const appliedMigrations = [];
+for (const [table, column, ddl] of MIGRATIONS) {
+  const columns = tableColumns(table);
+  if (!columns.has(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    appliedMigrations.push(`${table}.${column}`);
+  }
+}
 
 const nowIso = () => new Date().toISOString();
 
@@ -44,4 +60,4 @@ const transaction = (fn) => {
 
 const json = (value) => (value === undefined || value === null ? null : JSON.stringify(value));
 
-module.exports = { db, run, get, all, transaction, toPlain, nowIso, json };
+module.exports = { db, run, get, all, transaction, toPlain, nowIso, json, appliedMigrations };

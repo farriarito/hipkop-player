@@ -1,8 +1,7 @@
 'use strict';
 
 // Central runtime configuration. Everything is env-overridable so the same
-// build runs locally (SQLite file) and in production (SQLite file on a volume
-// or PostgreSQL via HIPKOP_DB_URL once a driver is provided).
+// build runs locally (SQLite file) and in production.
 
 const path = require('path');
 
@@ -50,6 +49,22 @@ module.exports = {
   seedArtists: list(
     env.HIPKOP_SEED_ARTISTS,
     'aespa,BLACKPINK,G-DRAGON,法老,PACT,A$AP Rocky,Higher Brothers,Red Velvet,连麻,Kendrick Lamar,Travis Scott,NewJeans'
+  ),
+
+  // Cross-genre taxonomy. "Scene" cannot be derived from metadata alone, so it is
+  // curated (and env-extendable): this is what separates mainstream rap from the
+  // underground corner of the same genre.
+  mainstreamArtists: list(
+    env.HIPKOP_MAINSTREAM_ARTISTS,
+    'Drake,Travis Scott,Kendrick Lamar,A$AP Rocky,Kanye West,J. Cole,Nicki Minaj,21 Savage,Future,' +
+      'Metro Boomin,Playboi Carti,Post Malone,Doja Cat,Tyler, The Creator,Higher Brothers,GAI,' +
+      'aespa,BLACKPINK,NewJeans,G-DRAGON,Red Velvet,TWICE,IVE,LE SSERAFIM,(G)I-DLE,Stray Kids,SEVENTEEN,ITZY'
+  ),
+  undergroundArtists: list(
+    env.HIPKOP_UNDERGROUND_ARTISTS,
+    '法老,派克特,PACT,连麻,连麻Swimming,SASIOVERLXRD,JinJiBeWater,隼,RICHNOMADIC,艾志恒,Asen,谢帝,' +
+      '刀脚,马思唯,KnowKnow,Melo,Psy.P,Buzzy,3Bangz,鱼头,Kafe.Hu,小老虎,龙胆紫,阴三儿,贝贝,' +
+      '顽童MJ116,蛋堡,ØZI,李尔新,AnsrJ,OneOne,雾都'
   ),
 
   // Caching

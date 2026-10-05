@@ -81,7 +81,12 @@ async function search(rawQuery, { page = 1, pageSize = 20, forceRemote = false }
   let remoteProviders = [];
   let remoteError = null;
 
-  if (forceRemote || localCount < LOCAL_MIN) {
+  // A query can match plenty of tracks/albums yet no artist row at all (e.g.
+  // "Joji" matched a feature credit). Always reach the providers when the
+  // artist facet is empty so an arbitrary, not-yet-seeded artist is still
+  // discoverable with a real avatar and discography.
+  const thinArtistFacet = local.artists.length === 0;
+  if (forceRemote || localCount < LOCAL_MIN || thinArtistFacet) {
     try {
       const remote = await providers.search(query, { limit: 40 });
       remoteProviders = remote.providers || [];

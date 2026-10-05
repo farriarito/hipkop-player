@@ -28,6 +28,7 @@
       <button data-tab="community" onclick="navigate('community')"><img class="nav-icon" src="/assets/icons/nav/features.svg" alt="">社区</button>
       <button data-tab="profile" onclick="navigate('profile')"><img class="nav-icon" src="/assets/icons/nav/user.svg" alt="">我的</button>
     </nav>
+    <div id="sheet" class="sheet hidden" onclick="closeSheet()"><div class="sheet-card" id="sheetCard" onclick="event.stopPropagation()"></div></div>
     <div id="toast"></div>
   </div>
   <script src="/app.js"></script>
