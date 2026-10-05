@@ -33,6 +33,13 @@ for (const [table, column, ddl] of MIGRATIONS) {
   }
 }
 
+// These indexes depend on columns added by the migrations above. Creating
+// them after the additive migration keeps older SQLite catalogs bootable.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_artists_bucket ON artists (genre_bucket, scene);
+  CREATE INDEX IF NOT EXISTS idx_albums_bucket ON albums (genre_bucket, scene);
+`);
+
 const nowIso = () => new Date().toISOString();
 
 const toPlain = (row) => {

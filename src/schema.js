@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS artists (
   UNIQUE (provider, provider_artist_id)
 );
 CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name);
-CREATE INDEX IF NOT EXISTS idx_artists_bucket ON artists (genre_bucket, scene);
 
 CREATE TABLE IF NOT EXISTS albums (
   id                 TEXT PRIMARY KEY,
@@ -76,7 +75,6 @@ CREATE TABLE IF NOT EXISTS albums (
 );
 CREATE INDEX IF NOT EXISTS idx_albums_release ON albums (release_date DESC);
 CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title);
-CREATE INDEX IF NOT EXISTS idx_albums_bucket ON albums (genre_bucket, scene);
 
 CREATE TABLE IF NOT EXISTS tracks (
   id                 TEXT PRIMARY KEY,
