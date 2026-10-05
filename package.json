@@ -4,12 +4,12 @@
   "private": true,
   "description": "HIPKOP PLAYER — Rap + K-POP 竖屏音乐体验（SQLite 目录 + 元数据 Provider）",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "sync": "node scripts/sync-once.js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --env-file-if-exists=.env server.js",
+    "sync": "node --env-file-if-exists=.env scripts/sync-once.js",
     "check": "node --check server.js && node --check public/app.js",
     "test": "node --test",
-    "agent:taxonomy": "node scripts/taxonomy-agent.js"
+    "agent:taxonomy": "node --env-file-if-exists=.env scripts/taxonomy-agent.js"
   },
   "type": "commonjs",
   "main": "server.js",

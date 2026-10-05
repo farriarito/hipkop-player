@@ -6,7 +6,7 @@ HIPKOP PLAYER 是面向 **全球 HipHop/Rap + K-POP** 听众的竖屏音乐体�
 
 - 竖屏手机壳：首页 / 榜单 / 发现 / 社区 / 我的
 - **曲风分桶**（`src/taxonomy.js`）：统一为 HipHop / K-POP / 其他三档，榜单与发现共用一条 `genre_bucket` 轴，不再区分「主流 / 地下」
-- **艺人分桶 Agent**（`src/agents/`，`npm run agent:taxonomy`）：iTunes 的艺人行九成没有流派，因此改按艺人自有专辑的流派分布投票分桶，置信度不足就挂起等更多数据。专辑桶与艺人桶共用同一套关键词，含韩文 `힙합/랩`、日文 `ヒップホップ／ラップ`、中文 `说唱` 等非拉丁标签；可选接 OpenAI 兼容端点处理低置信度样本
+- **艺人分桶 Agent**（`src/agents/`，`npm run agent:taxonomy`）：iTunes 的艺人行九成没有流派，因此改按艺人自有专辑的流派分布投票分桶，置信度不足就挂起等更多数据。专辑桶与艺人桶共用同一套关键词，含韩文 `힙합/랩`、日文 `ヒップホップ／ラップ`、中文 `说唱` 等非拉丁标签；填上 `DEEPSEEK_API_KEY` 即可接 DeepSeek 官方 API 处理低置信度样本
 - **SQLite 元数据目录**（Node 内置 `node:sqlite`，零依赖）：`artists` / `albums` / `tracks` / `album_artists` / `track_artists` / `metadata_sources` / `cover_cache` / `sync_jobs` / `community_posts` / `album_aliases`
 - **合法、稳定的元数据 Provider**：iTunes/Apple Music（封面 + 作品，无需 Key）、MusicBrainz（艺人资料富化，无需 Key），可选 Deezer（艺人头像）与 Last.fm（需 `LASTFM_API_KEY`）
 - **搜索**：本地目录优先，结果不足时调用 Provider，归一化后落库并建立艺人-专辑-曲目关联；结果按 艺人 / 专辑 / 单曲 分组
@@ -111,6 +111,28 @@ data/                      SQLite 与媒体缓存（已 gitignore）
 | `LASTFM_API_KEY` | 空 | 开启 Last.fm（艺人头像/简介） |
 | `HIPKOP_SCHEDULER` | `1` | 设为 `0` 关闭后台同步 |
 | `HIPKOP_DAILY_SYNC_HOUR` | `4` | 每日同步小时 |
+| `DEEPSEEK_API_KEY` | 空 | 填上就自动启用 Agent 的模型后端（DeepSeek 官方 API） |
+| `HIPKOP_AGENT_URL` | 有 Key 时指向 DeepSeek | 任意 OpenAI 兼容的 `/chat/completions` 端点 |
+| `HIPKOP_AGENT_KEY` | 取 `DEEPSEEK_API_KEY` | 覆盖 Key，用于非 DeepSeek 端点 |
+| `HIPKOP_AGENT_MODEL` | `deepseek-chat` | 模型名 |
+| `HIPKOP_AGENT_MIN_CONFIDENCE` | `0.7` | 分桶落库的置信度阈值 |
+| `HIPKOP_AGENT_BATCH` | `50` | 每次请求提交的艺人数量 |
+| `HIPKOP_AGENT_TIMEOUT_MS` | `30000` | 单次请求超时 |
+
+### 用 DeepSeek 驱动分桶 Agent
+
+Agent 默认完全离线。想让它处理「专辑只标了 Pop / Dance / Music」这类灰色样本，给一个 Key 就行：
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，填上 DEEPSEEK_API_KEY=sk-xxxx
+npm run agent:taxonomy -- --probe               # 先探活，只打印模型判定，不写库
+npm run agent:taxonomy -- --apply --limit 500   # 落库
+```
+
+`npm start` / `npm run sync` / `npm run agent:taxonomy` 都会自动加载根目录的 `.env`（用 Node 自带的 `--env-file-if-exists`，不引入依赖）；没有 `.env` 时只提示一行，不影响运行。`.env` 已在 `.gitignore` 里，Key 不会被提交。
+
+换其它 OpenAI 兼容端点（含自建代理）时设 `HIPKOP_AGENT_URL` + `HIPKOP_AGENT_KEY` + `HIPKOP_AGENT_MODEL`。URL 可以只写到 base（`https://api.deepseek.com` 或 `.../v1`），路径会自动补成 `/chat/completions`。任何失败——Key 无效、余额不足、超时、模型答了段散文——都只记一条 warning 并退回本地规则，同步任务不会中断。
 
 ## Provider 与许可
 

@@ -21,6 +21,16 @@ const list = (value, fallback) => {
     .filter(Boolean);
 };
 
+// Taxonomy agent wiring. Resolved before the export so agentUrl and agentModel
+// can depend on whether a key exists.
+//   DEEPSEEK_API_KEY          ->  https://api.deepseek.com/chat/completions
+//   HIPKOP_AGENT_URL          ->  any OpenAI-compatible /chat/completions
+//   HIPKOP_AGENT_KEY          ->  overrides DEEPSEEK_API_KEY when both are set
+const agentKey = env.HIPKOP_AGENT_KEY || env.DEEPSEEK_API_KEY || '';
+const agentUrl = env.HIPKOP_AGENT_URL || (agentKey ? 'https://api.deepseek.com/chat/completions' : '');
+const agentModel =
+  env.HIPKOP_AGENT_MODEL || (/deepseek\.com/i.test(agentUrl) ? 'deepseek-chat' : '');
+
 module.exports = {
   root,
   port: Number(env.HIPKOP_PLAYER_PORT || 4180),
@@ -71,11 +81,15 @@ module.exports = {
       '顽童MJ116,蛋堡,ØZI,李尔新,AnsrJ,OneOne,雾都'
   ),
 
-  // Taxonomy agent. Empty agentUrl keeps the deterministic offline heuristic;
-  // set it to an OpenAI-compatible endpoint to upgrade the low-confidence cases.
-  agentUrl: env.HIPKOP_AGENT_URL || '',
-  agentKey: env.HIPKOP_AGENT_KEY || '',
-  agentModel: env.HIPKOP_AGENT_MODEL || '',
+  // Taxonomy agent. Without a key it stays on the deterministic offline
+  // heuristic; with one it upgrades low-confidence artists through an
+  // OpenAI-compatible endpoint. DeepSeek is the default target, so setting
+  // DEEPSEEK_API_KEY alone is enough to turn the model backend on.
+  agentUrl,
+  agentKey,
+  agentModel,
+  agentJsonMode: bool(env.HIPKOP_AGENT_JSON_MODE, true),
+  agentTimeoutMs: Number(env.HIPKOP_AGENT_TIMEOUT_MS || 30000),
   agentMinConfidence: Number(env.HIPKOP_AGENT_MIN_CONFIDENCE || 0.7),
   agentBatchSize: Number(env.HIPKOP_AGENT_BATCH || 50),
 

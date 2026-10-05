@@ -14,6 +14,8 @@ process.env.HIPKOP_MEDIA_DIR = path.join(os.tmpdir(), `hipkop-taxonomy-media-${s
 process.env.HIPKOP_DISABLED_PROVIDERS = 'itunes,deezer,musicbrainz,lastfm';
 process.env.HIPKOP_SCHEDULER = '0';
 delete process.env.HIPKOP_AGENT_URL;
+delete process.env.DEEPSEEK_API_KEY;
+delete process.env.HIPKOP_AGENT_KEY;
 
 const N = require('../src/normalize');
 const repo = require('../src/repo');
