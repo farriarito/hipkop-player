@@ -359,10 +359,30 @@ function pickView() {
 function statStrip() {
   const stats = state.stats || { artists: 0, albums: 0, tracks: 0, posts: 0 };
   return `<section class="stat-strip">
-    <div><b>${esc(stats.artists)}</b><span>收录歌手</span></div>
-    <div><b>${esc(stats.albums)}</b><span>专辑 / 单曲</span></div>
-    <div><b>${esc(stats.posts)}</b><span>社区帖子</span></div>
+    <button type="button" aria-label="浏览 ${esc(stats.artists)} 位收录歌手，前往发现页搜索" onclick="statGo('artists')"><b>${esc(stats.artists)}</b><span>收录歌手</span></button>
+    <button type="button" aria-label="浏览 ${esc(stats.albums)} 张专辑与单曲，前往发现页筛选" onclick="statGo('albums')"><b>${esc(stats.albums)}</b><span>专辑 / 单曲</span></button>
+    <button type="button" aria-label="查看 ${esc(stats.posts)} 条社区帖子" onclick="statGo('posts')"><b>${esc(stats.posts)}</b><span>社区帖子</span></button>
   </section>`;
+}
+
+// The stat strip reads as tappable, so each cell routes somewhere real:
+// artists -> discover with the search field focused, albums -> the discover
+// filter block, posts -> the community feed.
+async function statGo(kind) {
+  if (kind === 'posts') return navigate('community');
+  await navigate('discover');
+  if (kind === 'artists') {
+    const input = $('#discoverInput');
+    if (input) {
+      if (typeof input.focus === 'function') input.focus();
+      if (typeof input.select === 'function') input.select();
+    }
+    return;
+  }
+  const target = $('#browseSection');
+  if (target && typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  }
 }/* --------------------------------- pages ---------------------------------- */
 
 function sortByReleaseDateDesc(items) {
@@ -539,7 +559,7 @@ async function viewDiscover() {
   return `<div class="page-title"><span class="eyebrow">DISCOVER</span><h1>发现</h1><p>搜索任意艺人，或按风格 / 场景 / 年份筛选新发行。</p></div>
     <section class="section discover-search"><div class="inline-search"><input id="discoverInput" aria-label="搜索艺人、专辑、单曲或组合" placeholder="搜索艺人、专辑、单曲或组合" oninput="onDiscoverInput()"><button type="button" onclick="runDiscover()">搜索</button></div><div id="discoverResults" role="region" aria-label="搜索结果">${searchResultsHtml(state.discover)}</div></section>
     ${offlineNotice()}
-    <section class="section"><div class="section-head"><h2>筛选</h2><span class="section-action" aria-live="polite">${state.browse.items.length} 张作品</span></div>
+    <section class="section" id="browseSection"><div class="section-head"><h2>筛选</h2><span class="section-action" aria-live="polite">${state.browse.items.length} 张作品</span></div>
       <div class="filter-block"><label>风格</label>${chips(BUCKET_TABS, state.browse.bucket, 'setBrowseBucket', '风格筛选')}</div>
       <div class="filter-block"><label>场景</label>${chips(SCENE_TABS, state.browse.scene, 'setBrowseScene', '场景筛选')}</div>
       <div class="filter-block"><label>年份</label>${chips(years, state.browse.year, 'setBrowseYear', '年份筛选')}</div>

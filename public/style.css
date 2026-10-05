@@ -105,3 +105,11 @@ html{scroll-padding-top:calc(80px + env(safe-area-inset-top));scroll-padding-bot
 .scene-rail .feature b{font-size:8px;line-height:1.35;letter-spacing:.04em}
 .scene-rail .feature h3{font-size:12px;line-height:1.25;margin:7px 0 4px;letter-spacing:-.03em;overflow-wrap:anywhere}
 .scene-rail .feature p{font-size:9px;line-height:1.45;max-width:none}
+
+/* --- HIPKOP v0.8: tappable stat strip ------------------------------------- */
+.stat-strip>button{border:0;background:transparent;color:inherit;font:inherit;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:2px 0;min-height:44px;cursor:pointer;border-radius:var(--r-xs);transition:background var(--dur) var(--ease)}
+.stat-strip>button span::after{content:'\203A';margin-left:5px;color:var(--acid);opacity:.85}
+.stat-strip>button:hover{background:#ffffff0a}
+.stat-strip>button:hover b{color:var(--acid)}
+.stat-strip>button:active{background:#ffffff14}
+.stat-strip>button:active b{color:var(--acid)}
