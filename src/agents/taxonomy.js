@@ -15,6 +15,7 @@
 const repo = require('../repo');
 const config = require('../config');
 const log = require('../util/logger')('agent:taxonomy');
+const T = require('../taxonomy');
 const { classifyArtist } = require('./classify');
 const model = require('./model');
 
@@ -22,6 +23,10 @@ const model = require('./model');
 // safe to apply) from genuinely mixed evidence such as Dance x6 + Hip-Hop/Rap x4
 // (0.667, held for review).
 const DEFAULT_MIN_CONFIDENCE = 0.7;
+
+// Two artist rows are the same artist when their normalised names match, so that
+// is the unit the model is asked about.
+const groupKeyOf = (artist) => T.key(artist.name) || artist.id;
 
 async function runTaxonomyAgent(options = {}) {
   const limit = Number(options.limit) > 0 ? Number(options.limit) : config.agentBatchSize;
@@ -43,7 +48,33 @@ async function runTaxonomyAgent(options = {}) {
     byArtist.get(row.artistId).push({ genre: row.genre, count: row.count });
   }
 
-  const modelAnswers = await model.askModel(candidates, byArtist);
+  // A name-only stub and the real provider row for the same artist can coexist
+  // between two calibration passes. Asking once per distinct artist keeps the
+  // verdicts consistent - two rows of one artist must never land in two buckets
+  // - and halves the tokens.
+  const groups = new Map();
+  for (const artist of candidates) {
+    const groupKey = groupKeyOf(artist);
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, { id: groupKey, name: artist.name, genre: artist.genre || null, members: [] });
+    }
+    const group = groups.get(groupKey);
+    group.members.push(artist);
+    if (!group.genre && artist.genre) group.genre = artist.genre;
+  }
+  const modelEvidence = new Map();
+  for (const group of groups.values()) {
+    const merged = new Map();
+    for (const member of group.members) {
+      for (const row of byArtist.get(member.id) || []) {
+        merged.set(row.genre, (merged.get(row.genre) || 0) + row.count);
+      }
+    }
+    modelEvidence.set(group.id, [...merged.entries()].map(([genre, count]) => ({ genre, count })));
+  }
+
+  // options.modelDeps lets a test inject the transport instead of the network.
+  const modelAnswers = await model.askModel([...groups.values()], modelEvidence, options.modelDeps);
 
   const samples = [];
   let applied = 0;
@@ -52,7 +83,7 @@ async function runTaxonomyAgent(options = {}) {
 
   for (const artist of candidates) {
     const verdict =
-      (modelAnswers && modelAnswers.get(artist.id)) ||
+      (modelAnswers && modelAnswers.get(groupKeyOf(artist))) ||
       classifyArtist({ name: artist.name, genre: artist.genre, albums: byArtist.get(artist.id) || [] });
 
     if (!verdict || verdict.genreBucket === 'unknown' || !(verdict.confidence > 0)) {

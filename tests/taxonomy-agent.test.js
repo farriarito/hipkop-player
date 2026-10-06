@@ -144,3 +144,55 @@ test('agent: promotion never overwrites an existing bucket', () => {
   repo.promoteArtistTaxonomy('itunes-artist-7001', { genreBucket: 'kpop', genre: 'K-Pop' });
   assert.strictEqual(repo.getArtistRow('itunes-artist-7001').genreBucket, 'hiphop');
 });
+
+// Two artist rows can exist for one artist - a name-only stub plus the real
+// provider row - until calibration merges them. They must never end up in two
+// different buckets, and the model must only be asked once.
+test('agent: rows sharing an artist name get one verdict and one model call', async () => {
+  const first = N.normalizeArtistRef('itunes', '8001', 'Twin Act');
+  const second = N.normalizeArtistRef('itunes', '8002', 'Twin Act');
+  seedAlbum('e1', 'Twin One', first, 'Hip-Hop/Rap');
+  seedAlbum('e2', 'Twin Two', second, 'Hip-Hop/Rap');
+  const before = repo.listTaxonomyCandidates(500).filter((artist) => artist.name === 'Twin Act');
+  assert.strictEqual(before.length, 2, 'two rows for one artist');
+
+  // The rest of this file runs offline on purpose; enable the model for this test
+  // only by flipping the resolved config (askModel reads it at call time).
+  const config = require('../src/config');
+  const restore = { url: config.agentUrl, key: config.agentKey, model: config.agentModel };
+  config.agentUrl = 'https://example.test/chat/completions';
+  config.agentKey = 'test-key';
+  config.agentModel = 'test-model';
+
+  let calls = 0;
+  let twinsInRoster = 0;
+  let rosterSize = 0;
+  const modelDeps = {
+    request: async ({ body }) => {
+      calls += 1;
+      const roster = JSON.parse(body.messages[1].content);
+      rosterSize = roster.length;
+      twinsInRoster = roster.filter((row) => row.name === 'Twin Act').length;
+      return {
+        choices: [{ message: { content: JSON.stringify({ results: roster.map((row) => ({ id: row.id, genreBucket: 'hiphop', confidence: 0.95, reason: 'twin' })) }) } }]
+      };
+    }
+  };
+
+  const summary = await runTaxonomyAgent({ limit: 500, dryRun: true, modelDeps });
+  assert.ok(summary.scanned >= 2);
+  assert.strictEqual(calls, 1, 'one batch for the whole run');
+  assert.strictEqual(before.length, 2, 'sanity: two rows for the twin');
+  assert.strictEqual(twinsInRoster, 1, 'the twin is asked about once');
+  assert.ok(rosterSize < 6, 'the roster only holds the distinct artists');
+
+  await runTaxonomyAgent({ limit: 500, dryRun: false, modelDeps });
+  const after = repo.listTaxonomyCandidates(500).filter((artist) => artist.name === 'Twin Act');
+  assert.strictEqual(after.length, 0, 'both rows left the candidate set');
+  const rows = all(`SELECT genre_bucket AS bucket FROM artists WHERE name = 'Twin Act'`);
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual([...new Set(rows.map((row) => row.bucket))], ['hiphop'], 'one bucket for both rows');
+  config.agentUrl = restore.url;
+  config.agentKey = restore.key;
+  config.agentModel = restore.model;
+});

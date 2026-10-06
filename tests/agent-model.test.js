@@ -82,6 +82,13 @@ test('agent model: drops rows with an unknown bucket or no confidence', () => {
   assert.deepStrictEqual(model.parseResults(rows).map((row) => row.id), ['a1']);
 });
 
+test('agent model: the outgoing request is JSON, not text/plain', () => {
+  const headers = model.buildChatHeaders();
+  // Without this header undici labels the body text/plain and the API answers 415.
+  assert.strictEqual(headers['Content-Type'], 'application/json');
+  assert.strictEqual(headers.Authorization, 'Bearer test-key');
+});
+
 test('agent model: a good answer becomes a verdict map', async () => {
   const seen = [];
   const request = async (payload) => {

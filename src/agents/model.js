@@ -117,11 +117,19 @@ const describe = () => ({
   jsonMode: config.agentJsonMode
 });
 
+// Content-Type is not optional: without it undici labels a string body as
+// text/plain and the endpoint answers 415 instead of reading the JSON.
+const buildChatHeaders = () =>
+  Object.assign(
+    { 'Content-Type': 'application/json' },
+    config.agentKey ? { Authorization: 'Bearer ' + config.agentKey } : {}
+  );
+
 const postChat = async ({ endpoint, body, timeoutMs }) => {
   const response = await fetchWithRetry(endpoint, {
     attempts: 2,
     timeout: timeoutMs,
-    headers: config.agentKey ? { Authorization: 'Bearer ' + config.agentKey } : {},
+    headers: buildChatHeaders(),
     method: 'POST',
     body: JSON.stringify(body)
   });
@@ -172,6 +180,7 @@ module.exports = {
   isEnabled,
   resolveChatEndpoint,
   buildChatBody,
+  buildChatHeaders,
   extractResults,
   parseResults,
   describe,

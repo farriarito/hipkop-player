@@ -18,11 +18,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const backoffDelay = (attempt, base) =>
   Math.round(base * 2 ** attempt + Math.random() * 150);
 
-async function fetchOnce(url, { timeout = config.httpTimeoutMs, headers = {} } = {}) {
+// `init` carries the rest of the caller's fetch options - crucially method and
+// body. Dropping them silently turned every POST into a GET, which endpoints
+// answer with a 405.
+async function fetchOnce(url, { timeout = config.httpTimeoutMs, headers = {}, ...init } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
     return await fetch(url, {
+      ...init,
       signal: controller.signal,
       redirect: 'follow',
       headers: { ...DEFAULT_HEADERS, ...headers }
@@ -42,13 +46,16 @@ async function fetchWithRetry(url, options = {}) {
     timeout = config.httpTimeoutMs,
     headers = {},
     backoffMs = 400,
-    wait = true
+    wait = true,
+    ...init
   } = options;
+  // Note: a retry re-sends the body. Every caller here is an idempotent read
+  // (metadata lookups, chat completions), so that is safe.
 
   let lastError;
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt += 1) {
     try {
-      const response = await fetchOnce(url, { timeout, headers });
+      const response = await fetchOnce(url, { timeout, headers, ...init });
       if (response.ok) return response;
 
       const error = new Error(`upstream_http_${response.status}`);
