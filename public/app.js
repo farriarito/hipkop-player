@@ -504,7 +504,7 @@ async function viewCharts() {
 /* -------------------------------- discover -------------------------------- */
 
 function discoverHint() {
-  return '<div class="discover-hint">试试搜索：aespa · 法老 · PACT · Higher Brothers · BLACKPINK · G-DRAGON · A$AP Rocky</div>';
+  return '';
 }
 
 function yearTabs() {
@@ -552,7 +552,7 @@ async function viewDiscover() {
   return `<div class="page-title"><span class="eyebrow">DISCOVER</span><h1>发现</h1><p>搜索任意艺人，或按风格 / 场景 / 年份筛选新发行。</p></div>
     <section class="section discover-search"><div class="inline-search"><input id="discoverInput" aria-label="搜索艺人、专辑、单曲或组合" placeholder="搜索艺人、专辑、单曲或组合" oninput="onDiscoverInput()"><button type="button" onclick="runDiscover()">搜索</button></div><div id="discoverResults" role="region" aria-label="搜索结果">${searchResultsHtml(state.discover)}</div></section>
     ${offlineNotice()}
-    <section class="section" id="browseSection"><div class="section-head"><h2>筛选</h2><span class="section-action" aria-live="polite">${state.browse.items.length} 张作品</span></div>
+    <section class="section" id="browseSection"><div class="section-head"><h2>筛选</h2></div>
       <div class="filter-block"><label>风格</label>${chips(BUCKET_TABS, state.browse.bucket, 'setBrowseBucket', '风格筛选')}</div>
       <div class="filter-block"><label>年份</label>${chips(years, state.browse.year, 'setBrowseYear', '年份筛选')}</div>
       <div class="sort-row"><label for="browseSort">排序</label><select id="browseSort" onchange="setBrowseSort(this.value)">${SORT_TABS.map((tab) => `<option value="${tab.key}" ${state.browse.sort === tab.key ? 'selected' : ''}>${esc(tab.label)}</option>`).join('')}</select></div>
