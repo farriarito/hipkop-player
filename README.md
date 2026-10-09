@@ -43,6 +43,14 @@ npm run agent:taxonomy       # 艺人分桶 dry-run
 npm run agent:taxonomy -- --apply --limit 500   # 落库
 ```
 
+部署到公网（Docker / PaaS / 隧道三条路径）：见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
+```bash
+cp .env.example .env          # 必须配置 HIPKOP_DOMAIN、HIPKOP_ADMIN_TOKEN
+# 先按 docs/DEPLOY.md 迁移私有数据库和封面，再启动 HTTPS 服务
+docker compose up -d --build
+```
+
 ## 目录结构
 
 ```text
@@ -128,6 +136,14 @@ Copy-Item .env.example .env
 # 编辑 .env，填上 DEEPSEEK_API_KEY=sk-xxxx
 npm run agent:taxonomy -- --probe               # 先探活，只打印模型判定，不写库
 npm run agent:taxonomy -- --apply --limit 500   # 落库
+```
+
+部署到公网（Docker / PaaS / 隧道三条路径）：见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
+```bash
+cp .env.example .env          # 可选：填 DEEPSEEK_API_KEY
+docker compose up -d --build  # http://127.0.0.1:8080/api/health
+```
 ```
 
 `npm start` / `npm run sync` / `npm run agent:taxonomy` 都会自动加载根目录的 `.env`（用 Node 自带的 `--env-file-if-exists`，不引入依赖）；没有 `.env` 时只提示一行，不影响运行。`.env` 已在 `.gitignore` 里，Key 不会被提交。

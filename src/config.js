@@ -45,7 +45,7 @@ module.exports = {
   requireAccount: production || bool(env.HIPKOP_REQUIRE_ACCOUNT, false),
   moderatePosts: production || bool(env.HIPKOP_MODERATE_POSTS, false),
   port: Number(env.HIPKOP_PLAYER_PORT || env.PORT || 4180),
-  host: env.HIPKOP_PLAYER_HOST || (production ? '0.0.0.0' : '127.0.0.1'),
+  host: env.HIPKOP_PLAYER_HOST || (production || (env.PORT && !env.HIPKOP_PLAYER_PORT) ? '0.0.0.0' : '127.0.0.1'),
   publicDir: path.join(root, 'public'),
   dbPath: env.HIPKOP_DB_PATH || path.join(root, 'data', 'hipkop.sqlite'),
   dbUrl: env.HIPKOP_DB_URL || '',

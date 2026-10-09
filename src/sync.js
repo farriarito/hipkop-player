@@ -253,6 +253,16 @@ async function syncArtistProfile(artistId) {
   return { artistId, refreshed };
 }
 
+// An Apple collection id only exists in the storefront that published it, and a
+// KR/JP album looked up in the US catalog comes back empty. Chart syncing records
+// the storefront it came from, so that one is tried first and the configured
+// storefronts act as a fallback for search-synced albums.
+function storefrontsFor(row) {
+  const fromChart = /^apple-rss:([a-z]{2})$/i.exec(String((row && row.chartSource) || ''));
+  const candidates = [fromChart && fromChart[1], ...config.itunesCountries, ...config.chartStorefronts];
+  return [...new Set(candidates.filter(Boolean).map((code) => String(code).trim().toLowerCase()))];
+}
+
 async function syncAlbum(albumId) {
   const row = repo.getAlbumRow(albumId);
   if (!row) return { skipped: 'album_not_found' };
@@ -260,13 +270,57 @@ async function syncAlbum(albumId) {
   if (!provider || typeof provider.getAlbum !== 'function' || !isRealProviderId(row.providerId)) {
     return { skipped: 'provider_unsupported' };
   }
-  const { album, tracks } = await provider.getAlbum(row.providerId);
-  if (album) {
-    repo.persistAlbum({ ...album, id: row.id }, tracks || []);
-    precache(album.coverUrl || row.coverUrl);
+
+  const tried = [];
+  // A storefront can publish the collection but ship no previews (Apple KR/JP do
+  // this for a lot of licensed catalogues), while the same collection in another
+  // storefront carries the 30s clips. So a bare album row is not a win: hold it
+  // as a metadata fallback and keep sweeping for tracks.
+  let albumOnly = null;
+  for (const country of storefrontsFor(row)) {
+    tried.push(country);
+    try {
+      const { album, tracks } = await provider.getAlbum(row.providerId, { country });
+      const list = tracks || [];
+      if (!album && !list.length) continue;
+      if (!list.length) {
+        if (album && !albumOnly) albumOnly = { country, album };
+        continue;
+      }
+      // Providers that answer with tracks but no collection row still have to
+      // land them, otherwise the album stays silent. Every column the upsert
+      // does not carry over is COALESCEd, so the chart row is never degraded.
+      repo.persistAlbum(album ? { ...album, id: row.id } : albumEntityFromRow(row), list);
+      if (album && album.coverUrl) precache(album.coverUrl);
+      drainWarmQueue();
+      return { albumId, country, tracks: list.length };
+    } catch (error) {
+      log.warn('album ' + albumId + ' lookup failed in ' + country + ': ' + error.message);
+    }
   }
+
+  // Nothing anywhere has a preview, but a storefront did confirm the release:
+  // persist that row so the cover/date/artist stay consistent on the client.
+  if (albumOnly) {
+    repo.persistAlbum({ ...albumOnly.album, id: row.id }, []);
+    if (albumOnly.album.coverUrl) precache(albumOnly.album.coverUrl);
+    drainWarmQueue();
+    return { albumId, country: albumOnly.country, tracks: 0, albumOnly: true };
+  }
+
   drainWarmQueue();
-  return { albumId, tracks: (tracks || []).length };
+  return { albumId, tried, tracks: 0 };
+}
+
+// Minimal album entity for a provider that returns tracks without the
+// collection row. Only the columns we actually know are sent, so the upsert's
+// COALESCE keeps the existing chart values (popularity, chart_source, ...).
+function albumEntityFromRow(row) {
+  return {
+    id: row.id, provider: row.provider, providerId: row.providerId, kind: row.kind,
+    title: row.title, artistDisplay: row.artistDisplay, coverUrl: row.coverUrl,
+    releaseDate: row.releaseDate, genre: row.genre
+  };
 }
 
 async function syncSearch(query) {
@@ -401,6 +455,7 @@ module.exports = {
   runJob,
   executeJob,
   syncCharts,
+  storefrontsFor,
   chartFeedUrl,
   chartEntry,
   chartEntriesForFeed,

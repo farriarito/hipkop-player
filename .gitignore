@@ -18,3 +18,5 @@ docs/*-mobile.png
 # Reverse-engineered reference material (kept local, not published)
 out_wx0870e45bb54e96f1/
 Soundive_reverse_report.md
+# Downloaded by deploy/quick-tunnel.ps1
+deploy/cloudflared.exe
