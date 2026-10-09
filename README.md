@@ -138,14 +138,6 @@ npm run agent:taxonomy -- --probe               # 先探活，只打印模型判
 npm run agent:taxonomy -- --apply --limit 500   # 落库
 ```
 
-部署到公网（Docker / PaaS / 隧道三条路径）：见 [docs/DEPLOY.md](docs/DEPLOY.md)。
-
-```bash
-cp .env.example .env          # 可选：填 DEEPSEEK_API_KEY
-docker compose up -d --build  # http://127.0.0.1:8080/api/health
-```
-```
-
 `npm start` / `npm run sync` / `npm run agent:taxonomy` 都会自动加载根目录的 `.env`（用 Node 自带的 `--env-file-if-exists`，不引入依赖）；没有 `.env` 时只提示一行，不影响运行。`.env` 已在 `.gitignore` 里，Key 不会被提交。
 
 换其它 OpenAI 兼容端点（含自建代理）时设 `HIPKOP_AGENT_URL` + `HIPKOP_AGENT_KEY` + `HIPKOP_AGENT_MODEL`。URL 可以只写到 base（`https://api.deepseek.com` 或 `.../v1`），路径会自动补成 `/chat/completions`。任何失败——Key 无效、余额不足、超时、模型答了段散文——都只记一条 warning 并退回本地规则，同步任务不会中断。
@@ -199,7 +191,7 @@ node scripts/sync-once.js
 
 ```powershell
 # 触发一次校准，看 before/after 是否收敛
-Invoke-RestMethod -Method POST http://127.0.0.1:4181/api/sync/calibrate | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method POST http://127.0.0.1:4181/api/sync/calibrate -Headers @{Authorization="Bearer $env:HIPKOP_ADMIN_TOKEN"} | ConvertTo-Json -Depth 5
 # 一致性（duplicate* 应为 0）
 Invoke-RestMethod http://127.0.0.1:4181/api/health | Select-Object -Expand consistency
 # 任意未预置艺人：应返回艺人 + 真实头像 + 关联作品，且详情页有 QQ 音乐跳转

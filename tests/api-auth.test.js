@@ -64,8 +64,10 @@ test('api auth: an unset token disables admin routes, even locally', () => {
     server.listen(0, '127.0.0.1', async () => {
       const base = 'http://127.0.0.1:' + server.address().port;
       const response = await fetch(base + '/api/sync/jobs');
+        await response.text();
       process.stdout.write(String(response.status));
-      process.exit(0);
+        server.closeAllConnections();
+        server.close(() => require(${JSON.stringify(path.join(root, 'src/db.js'))}).db.close());
     });
   `;
   const out = execFileSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8' });

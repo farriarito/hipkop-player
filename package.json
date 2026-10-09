@@ -19,6 +19,7 @@
     "assets:vendor": "node scripts/vendor-assets.js",
     "postinstall": "node scripts/vendor-assets.js",
     "test:ui": "node scripts/verify-exhibition.js",
+    "test:public": "node scripts/verify-public-launch.js",
     "test:culture": "node scripts/verify-culture.js"
   },
   "type": "commonjs",
