@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">HIPKOP</title>
+  <defs><linearGradient id="heat" x1="13" y1="8" x2="115" y2="119" gradientUnits="userSpaceOnUse"><stop stop-color="#D5FF58"/><stop offset=".52" stop-color="#A9F33F"/><stop offset="1" stop-color="#9B7BFF"/></linearGradient></defs>
+  <rect width="128" height="128" rx="34" fill="#15141D"/>
+  <path d="M27 47a37 37 0 0 1 74 0v16h-9V47a28 28 0 0 0-56 0v16h-9V47Z" fill="url(#heat)"/>
+  <path d="M21 57c0-5 4-9 9-9h8v39h-8c-5 0-9-4-9-9V57Zm86 0c0-5-4-9-9-9h-8v39h8c5 0 9-4 9-9V57Z" fill="url(#heat)"/>
+  <path d="M48 76v28h11V87h12v17h11V76H48Z" fill="#F8F7FF"/><circle cx="101" cy="100" r="5" fill="#C8FF4D"/>
+</svg>

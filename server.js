@@ -37,9 +37,9 @@ const MIME = {
 const PUBLIC = path.resolve(config.publicDir);
 
 function serveStatic(req, res, pathname) {
-  const relative = pathname === '/' || pathname === '' ? 'index.html' : `.${pathname}`;
+  const relative = ['/', '', '/hipkop', '/hipkop/'].includes(pathname) ? 'index.html' : `.${pathname}`;
   const filePath = path.resolve(PUBLIC, relative);
-  if (!filePath.startsWith(PUBLIC) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+  if (!filePath.startsWith(`${PUBLIC}${path.sep}`) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not found');
     return;

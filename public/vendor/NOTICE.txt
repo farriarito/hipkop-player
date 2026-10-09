@@ -1,0 +1,10 @@
+HIPKOP bundled animation assets
+
+GSAP 3.14.2 and ScrollTrigger 3.14.2
+Copyright (c) GreenSock.
+Standard no-charge license: https://gsap.com/standard-license/
+Original distribution: https://www.npmjs.com/package/gsap
+Distributed minified files retain their original license headers.
+
+Outfit font files are distributed under the SIL Open Font License 1.1.
+Full font license is in /assets/fonts/OFL.txt.

@@ -7,32 +7,15 @@
  *   /api/tracks/:id  /api/search  /api/categories  /api/community/posts
  * Each album/track carries `listen.platforms`, so "听完整版" jumps straight to
  * QQ 音乐 / 网易云 / Apple Music instead of stopping at a 30s preview. The
- * arrays below are an OFFLINE FALLBACK ONLY, used when the API is unreachable.
+ * Empty/offline states never stand in for real catalog or community records.
  */
 
 /* ------------------------------- fallback -------------------------------- */
 
-const FALLBACK_ALBUMS = [
-  { id: 'fallback-1', kind: 'album', title: 'MUSE', artist: 'aespa', artistId: 'fallback-aespa', genre: 'K-POP', genreBucket: 'kpop', year: '2026', releaseDate: '2026-09-21', score: 9.4, comments: 428, desc: '未来感、强节拍与极具辨识度的世界观。', coverUrl: '/media/cover/fallback-1' },
-  { id: 'fallback-2', kind: 'album', title: '五人组', artist: 'Higher Brothers', artistId: 'fallback-hb', genre: 'RAP', genreBucket: 'hiphop', year: '2026', releaseDate: '2026-09-14', score: 9.1, comments: 376, desc: '把中文说唱的街头能量带到更大的舞台。', coverUrl: '/media/cover/fallback-2' },
-  { id: 'fallback-3', kind: 'album', title: '生于未来', artist: '法老', artistId: 'fallback-pharaoh', genre: 'RAP', genreBucket: 'hiphop', year: '2025', releaseDate: '2025-12-08', score: 9.0, comments: 318, desc: '锋利写作、密集叙事与一张完整的作品。', coverUrl: '/media/cover/fallback-3' },
-  { id: 'fallback-4', kind: 'album', title: 'The Album', artist: 'BLACKPINK', artistId: 'fallback-bp', genre: 'K-POP', genreBucket: 'kpop', year: '2025', releaseDate: '2025-10-02', score: 8.9, comments: 289, desc: '强烈的流行结构与舞台感。', coverUrl: '/media/cover/fallback-4' },
-  { id: 'fallback-5', kind: 'album', title: 'Pink Tape', artist: 'A$AP Rocky', artistId: 'fallback-rocky', genre: 'RAP', genreBucket: 'hiphop', year: '2025', releaseDate: '2025-07-18', score: 8.8, comments: 254, desc: '跨越地下美学与主流制作的混合体。', coverUrl: '/media/cover/fallback-5' },
-  { id: 'fallback-6', kind: 'album', title: 'REBEL', artist: 'G-DRAGON', artistId: 'fallback-gd', genre: 'K-POP', genreBucket: 'kpop', year: '2026', releaseDate: '2026-08-30', score: 8.7, comments: 231, desc: '个性化视觉与极具张力的流行表达。', coverUrl: '/media/cover/fallback-6' }
-];
-
-const FALLBACK_ARTISTS = [
-  { id: 'fallback-aespa', name: 'aespa', genre: 'K-POP', region: '韩国', bio: '以未来感世界观、强烈编舞和电子流行为核心的女子组合。', avatarUrl: '/media/avatar/fallback-aespa', heroUrl: '/media/hero/fallback-aespa' },
-  { id: 'fallback-pharaoh', name: '法老', genre: 'RAP', region: '中国·上海', bio: '以叙事、社会观察与现场感染力著称的中文说唱音乐人。', avatarUrl: '/media/avatar/fallback-pharaoh', heroUrl: '/media/hero/fallback-pharaoh' },
-  { id: 'fallback-bp', name: 'BLACKPINK', genre: 'K-POP', region: '韩国', bio: '融合 Hip-Hop、流行与强舞台表现力的全球女子组合。', avatarUrl: '/media/avatar/fallback-bp', heroUrl: '/media/hero/fallback-bp' },
-  { id: 'fallback-rocky', name: 'A$AP Rocky', genre: 'RAP', region: '美国·纽约', bio: '将高端时装、视觉艺术与纽约说唱融合的艺术家。', avatarUrl: '/media/avatar/fallback-rocky', heroUrl: '/media/hero/fallback-rocky' }
-];
-
-const FALLBACK_POSTS = [
-  { id: 'fallback-post-1', topic: 'performance', title: '中文说唱和 K-POP 的现场差异', body: '一个更靠近叙事，一个更靠近编舞，但观众都在等待灯光亮起。', author: 'Melo7' },
-  { id: 'fallback-post-2', topic: 'recommend', title: '你心目中的年度最佳 Rap Album？', body: '国内外说唱一起投票，欢迎留下你的选择和理由。', author: 'HIPKOP 社区' },
-  { id: 'fallback-post-3', topic: 'general', title: '从鼓点到舞台：HipHop × K-POP', body: '采样、舞蹈和视觉设计正在越来越紧密地交汇。', author: 'Echo Chamber' }
-];
+// Offline and empty states are deliberately empty: never fabricate music or people.
+const FALLBACK_ALBUMS = [];
+const FALLBACK_ARTISTS = [];
+const FALLBACK_POSTS = [];
 
 const DEFAULT_TOPICS = [
   { key: 'all', label: '全部' },
@@ -66,9 +49,9 @@ const SORT_TABS = [
 
 const state = {
   page: 'home',
-  liked: new Set(),
+  liked: new Set(Object.keys(loadFavorites())),
   offline: false,
-  lastDetail: { page: 'home', id: null, kind: 'album' },
+  lastDetail: { page: 'home', id: null },
   releases: [],
   charts: [],
   hero: [],
@@ -79,6 +62,7 @@ const state = {
   chartSort: 'popularity',
   discover: null,
   browse: { bucket: 'all', year: 'all', sort: 'date', items: [] },
+  archivePicks: [],
   community: { topic: 'all', items: [], topics: [] },
   stats: null,
   categories: null,
@@ -123,22 +107,10 @@ function tagLine(item) {
   });
 }
 
-// Chart "heat": prefer a real provider heat value, otherwise fall back to a
-// stable editorial blend so no row ever renders an empty metric.
-function heatValue(item) {
-  const explicit = Number(item && (item.searchHeat ?? item.heat ?? item.popularity));
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  const comments = Number(item && item.comments) || 0;
-  const score = Number(item && item.score) || 0;
-  const date = item && item.releaseDate ? new Date(item.releaseDate).getTime() : 0;
-  const freshness = date ? Math.max(0, (date - Date.now() + 1000 * 86400 * 365) / (1000 * 86400 * 365)) : 0;
-  return comments * 1.4 + score * 42 + freshness * 10;
-}
-
-function heatPercent(item, collection = state.charts) {
-  const values = (collection || []).map(heatValue);
-  const max = Math.max(1, ...values);
-  return Math.max(1, Math.min(99, Math.round((heatValue(item) / max) * 100)));
+function heatPercent(item) {
+  // The Provider already maps chart rank to 0–100. Do not manufacture heat
+  // from comments, editorial scores or the currently displayed subset.
+  return item.popularity == null ? null : Math.max(0, Math.min(100, Math.round(Number(item.popularity))));
 }
 
 /* ------------------------------ data layer -------------------------------- */
@@ -160,22 +132,21 @@ async function safeApi(path, fallbackValue) {
 }/* ------------------------------- rendering -------------------------------- */
 
 function cover(item, extra = '') {
-  const url = item.coverUrl || (item.id ? `/media/cover/${encodeURIComponent(item.id)}` : '');
+  const url = window.HipkopCulture.resource(item.coverUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/cover/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg');
   const alt = item.title || item.name || '专辑封面';
   return `<div class="cover${extra ? ` ${extra}` : ''}"><img src="${esc(url)}" alt="${esc(alt)}" width="300" height="300" loading="lazy" decoding="async" onerror="this.style.display='none';this.closest('.cover')&&this.closest('.cover').classList.add('img-fallback')"><span>${esc(item.genre || item.kind || '')}</span></div>`;
 }
 
 function avatar(item, cls = '') {
-  const url = item.avatarUrl || (item.id ? `/media/avatar/${encodeURIComponent(item.id)}` : '');
+  const url = window.HipkopCulture.resource(item.avatarUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/avatar/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg');
   const alt = item.name || item.artist || '艺人头像';
   return `<img ${cls ? `class="${cls}" ` : ''}src="${esc(url)}" alt="${esc(alt)}" width="48" height="48" loading="lazy" decoding="async" onerror="this.style.display='none';var host=this.closest('.avatar-wrap,.artist-info,.artist-result,.avatar');if(host)host.classList.add('img-fallback')">`;
 }
 
 function albumCard(album) {
   const year = yearOf(album);
-  const score = album.score != null ? Number(album.score).toFixed(1) : '—';
   const label = `打开专辑 ${album.title || ''}${album.artist ? ' · ' + album.artist : ''}`;
-  return `<article class="card" role="button" tabindex="0" aria-label="${esc(label)}" onclick="openItem('${esc(album.id)}')" onkeydown="activateKey(event)">${cover(album)}<h3>${esc(album.title)}</h3><p>${esc(album.artist)} · ${esc(year)} · <b>${score}</b></p></article>`;
+  return `<article class="card" data-work-id="${esc(album.id)}"><button type="button" class="card-open" aria-label="${esc(label)}" onclick="openItem('${esc(album.id)}')">${cover(album)}<h3>${esc(album.title)}</h3><p>${esc(album.artist)}${year ? ' · ' + esc(year) : ''}</p></button>${window.HipkopCulture.actions(album, state.liked.has(album.id))}</article>`;
 }
 
 function releaseCard(album) {
@@ -198,14 +169,14 @@ function listenCta(item) {
   listenIndex.set(item.id, item);
   const primary = platforms.find((platform) => platform.key === 'qq') || platforms[0];
   const name = primary.name || '外部平台';
-  return `<div class="listen-row"><a class="cta" href="${esc(primary.url)}" target="_blank" rel="noopener">在${esc(name)}听完整版 <span aria-hidden="true">↗</span></a><button class="ghost" type="button" onclick="openListenById('${esc(item.id)}')" aria-label="选择收听平台：${esc(item.title || '')}" title="选择收听平台">选择收听平台</button></div>`;
+  return `<div class="listen-row"><button class="cta preview-cta" type="button" onclick="playWork('${esc(item.id)}')"><span class="play-shape" aria-hidden="true"></span>播放试听</button><a class="ghost" href="${esc(primary.url)}" target="_blank" rel="noopener">在${esc(name)}听完整版 <span aria-hidden="true">↗</span></a><button class="ghost" type="button" onclick="openListenById('${esc(item.id)}')" aria-label="选择收听平台：${esc(item.title || '')}" title="选择收听平台">选择收听平台</button></div>`;
 }
 
 function trackRow(track, index, options = {}) {
   const label = track.trackNumber != null ? String(track.trackNumber).padStart(2, '0') : index != null ? String(index + 1).padStart(2, '0') : '♪';
-  const listen = options.listen === false ? '' : listenButton(track, '');
+  const listen = options.listen === false ? '' : `<button class="track-preview" type="button" onclick="event.stopPropagation();playWork('${esc(track.id)}')" aria-label="播放 ${esc(track.title)} 试听"><span class="play-shape" aria-hidden="true"></span></button>${listenButton(track, '')}`;
   const name = `打开曲目 ${track.title || ''}${track.artist ? ' · ' + track.artist : ''}`;
-  return `<div class="track" role="button" tabindex="0" aria-label="${esc(name)}" onclick="openItem('${esc(track.id)}')" onkeydown="activateKey(event)"><span aria-hidden="true">${label}</span><b>${esc(track.title)}</b><em>${esc(track.artist || track.albumTitle || '')}</em>${listen}</div>`;
+  return `<div class="track${options.thumbnail ? ' track-with-art' : ''}" role="button" tabindex="0" aria-label="${esc(name)}" onclick="openItem('${esc(track.id)}')" onkeydown="activateKey(event)">${options.thumbnail ? cover(track, 'track-cover') : `<span aria-hidden="true">${label}</span>`}<b>${esc(track.title)}</b><em>${esc(track.artist || track.albumTitle || '')}</em>${listen}</div>`;
 }
 
 function artistResult(artist) {
@@ -214,19 +185,23 @@ function artistResult(artist) {
 }
 
 function postCard(post) {
-  const related = [post.albumTitle && `专辑 ${post.albumTitle}`, post.artistName && `艺人 ${post.artistName}`].filter(Boolean).join(' · ');
-  return `<article class="post"><div class="post-meta"><span>${esc(post.author || 'HIPKOP')}</span><span>${esc(topicLabel(post.topic))}</span></div><h3>${esc(post.title)}</h3><p>${esc(post.body)}</p>${related ? `<small class="post-related">${esc(related)}</small>` : ''}</article>`;
+  return window.HipkopCulture.post(post, topicLabel(post.topic));
 }
 
 const loading = (text = '正在加载…') => `<section class="section loading-block" role="status" aria-label="${esc(text)}"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line short"></div></section>`;
 const emptyState = (text) => `<p class="empty">${esc(text)}</p>`;
+let renderRevision = 0;
+let chartRequest = 0;
+let browseRequest = 0;
+let communityRequest = 0;
+let searchRequest = 0;
 
 function backButton() {
   return '<span class="back" role="button" tabindex="0" aria-label="返回" onclick="backFromDetail()" onkeydown="activateKey(event)"><span aria-hidden="true">←</span> 返回</span>';
 }
 
 function offlineNotice() {
-  return state.offline ? `<section class="section" role="status"><div class="discover-hint"><span aria-hidden="true">⚠</span> 无法连接目录服务，当前展示离线示例数据。请确认服务已启动。</div></section>` : '';
+  return state.offline ? `<section class="section" role="status"><div class="discover-hint">目录暂时离线。请稍后重试；HIPKOP 不用示例内容替代真实数据。</div></section>` : '';
 }
 
 /* ------------------------------ home pieces -------------------------------- */
@@ -235,97 +210,8 @@ function heroSlides() {
   return state.hero.length ? state.hero : FALLBACK_ALBUMS.slice(0, 3);
 }
 
-function heroCopy(album) {
-  const tags = tagLine(album).join(' · ');
-  const byline = [
-    album.artist ? `<span class="byline-artist">${esc(album.artist)}</span>` : '',
-    album.releaseDate ? `<span class="byline-date">${esc(album.releaseDate)}</span>` : ''
-  ].filter(Boolean).join('');
-  return `<span class="eyebrow">HIPKOP PICK${tags ? ' · ' + esc(tags) : ''}</span>
-        <h1>${esc(album.title)}</h1>
-        <p class="hero-byline">${byline}</p>
-        <span class="hero-cta">查看专辑 <span aria-hidden="true">→</span></span>`;
-}
-
-function heroBanner() {
-  const slides = heroSlides();
-  if (!slides.length) return '';
-  const index = state.heroIndex % slides.length;
-  const album = slides[index];
-  const image = album.coverUrl || `/media/cover/${encodeURIComponent(album.id)}`;
-  const dots = slides
-    .map((_, i) => `<button class="hero-dot ${i === index ? 'active' : ''}" type="button" onclick="heroGo(${i})" aria-label="第 ${i + 1} 张：${esc((slides[i] && slides[i].title) || '')}" aria-current="${i === index ? 'true' : 'false'}"></button>`)
-    .join('');
-  return `<section class="hero-banner" id="heroBanner" role="region" aria-roledescription="轮播" aria-label="编辑精选轮播" aria-live="off">
-    <div class="hero-slide" role="button" tabindex="0" aria-label="打开专辑 ${esc(album.title || '')}${album.artist ? ' · ' + esc(album.artist) : ''}" onclick="openItem('${esc(album.id)}')" onkeydown="activateKey(event)">
-      <div class="hero-bg" style="background-image:url('${esc(image)}')"></div>
-      <div class="hero-copy">
-        ${heroCopy(album)}
-      </div>
-    </div>
-    <div class="hero-nav"><button type="button" onclick="heroStep(-1)" aria-label="上一张" title="上一张"><span aria-hidden="true">‹</span></button><div class="hero-dots">${dots}</div><button type="button" onclick="heroStep(1)" aria-label="下一张" title="下一张"><span aria-hidden="true">›</span></button></div>
-  </section>`;
-}
-
-// Updates the active slide in place so keyboard focus on the carousel controls
-// is preserved (the old code replaced the whole banner via outerHTML).
-function heroGo(index) {
-  const slides = heroSlides();
-  if (!slides.length) return;
-  const total = slides.length;
-  state.heroIndex = ((index % total) + total) % total;
-  const node = $('#heroBanner');
-  if (!node) return;
-  const album = slides[state.heroIndex];
-  const image = album.coverUrl || `/media/cover/${encodeURIComponent(album.id)}`;
-  const bg = node.querySelector('.hero-bg');
-  if (bg) bg.style.backgroundImage = `url('${image}')`;
-  const copy = node.querySelector('.hero-copy');
-  if (copy) copy.innerHTML = heroCopy(album);
-  const slide = node.querySelector('.hero-slide');
-  if (slide) {
-    slide.setAttribute('aria-label', `打开专辑 ${album.title || ''}${album.artist ? ' · ' + album.artist : ''}`);
-    slide.onclick = () => openItem(album.id);
-  }
-  node.querySelectorAll('.hero-dot').forEach((dot, i) => {
-    const active = i === state.heroIndex;
-    dot.classList.toggle('active', active);
-    dot.setAttribute('aria-current', active ? 'true' : 'false');
-  });
-}
-
-function heroStep(delta) {
-  heroGo(state.heroIndex + delta);
-}
-
 function prefersReducedMotion() {
-  return Boolean(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-}
-
-let heroPaused = false;
-
-function heroShouldAdvance() {
-  if (state.page !== 'home') return false;
-  if (heroPaused || prefersReducedMotion()) return false;
-  if (typeof document !== 'undefined' && document.hidden) return false;
-  return Boolean($('#heroBanner'));
-}
-
-if (typeof window !== 'undefined') {
-  setInterval(() => {
-    if (heroShouldAdvance()) heroStep(1);
-  }, 6000);
-}
-
-if (typeof document !== 'undefined') {
-  const inHero = (node) => Boolean(node && node.closest && node.closest('#heroBanner'));
-  document.addEventListener('mouseover', (event) => { if (inHero(event.target)) heroPaused = true; });
-  document.addEventListener('mouseout', (event) => {
-    if (!inHero(event.target)) return;
-    if (!inHero(event.relatedTarget)) heroPaused = false;
-  });
-  document.addEventListener('focusin', (event) => { if (inHero(event.target)) heroPaused = true; });
-  document.addEventListener('focusout', (event) => { if (inHero(event.target)) heroPaused = false; });
+  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 }
 
 // Shared pool for 今日同频: prefer works that are NOT already shown in the
@@ -348,8 +234,8 @@ function pickView() {
   if (!pick) return emptyState('暂无推荐，等待同步完成。');
   const kind = pick.kind === 'single' ? 'SINGLE' : 'ALBUM';
   const tags = tagLine(pick).join(' · ');
-  const label = `今日同频 ${pick.title || ''}${pick.artist ? ' · ' + pick.artist : ''}`;
-  return `<div class="pick-card" role="button" tabindex="0" aria-label="${esc(label)}" onclick="openItem('${esc(pick.id)}')" onkeydown="activateKey(event)">${cover(pick, 'pick-cover')}<div><span class="eyebrow">今日同频 · ${kind}</span><h3>${esc(pick.title)}</h3><p>${esc(pick.artist)}${tags ? ' · ' + esc(tags) : ''}</p></div><button type="button" aria-label="换一个推荐" title="换一个推荐" onclick="event.stopPropagation();randomPick();paint();">换一个</button></div>`;
+  const label = `今天听点儿 ${pick.title || ''}${pick.artist ? ' · ' + pick.artist : ''}`;
+  return `<div class="pick-card" role="button" tabindex="0" aria-label="${esc(label)}" onclick="openItem('${esc(pick.id)}')" onkeydown="activateKey(event)">${cover(pick, 'pick-cover')}<div><span class="eyebrow">${kind} / 随机相遇</span><h3>${esc(pick.title)}</h3><p>${esc(pick.artist)}${tags ? ' · ' + esc(tags) : ''}</p></div><span class="pick-arrow" aria-hidden="true">↗</span></div>`;
 }
 
 function statStrip() {
@@ -451,23 +337,26 @@ async function viewHome() {
   state.homeNewIds = new Set(newReleases.map((item) => item.id));
   const charts = state.charts.slice(0, 10);
   const posts = state.community.items.slice(0, 3);
-  return `${offlineNotice()}${heroBanner()}
+  return `${offlineNotice()}${window.HipkopExhibition.stage(state.hero)}
     ${statStrip()}
     ${sceneRail()}
-    <section class="section"><div class="section-head"><h2>新作</h2><a role="button" tabindex="0" aria-label="查看全部新作" onclick="navigate('discover')" onkeydown="activateKey(event)">查看全部 <span aria-hidden="true">→</span></a></div><div class="release-scroller">${newReleases.map(releaseCard).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>今日同频</h2><button class="section-action" type="button" aria-label="换一个推荐" onclick="randomPick();paint();">换一个 <span aria-hidden="true">↻</span></button></div>${pickView()}</section>
-    <section class="section"><div class="section-head"><h2>编辑推荐</h2><a role="button" tabindex="0" aria-label="查看全部编辑推荐" onclick="navigate('discover')" onkeydown="activateKey(event)">查看全部 <span aria-hidden="true">→</span></a></div><div class="cards">${editorsPicks.map(albumCard).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>编辑榜 TOP10 <span class="eyebrow">编辑分 · 每日更新</span></h2><a role="button" tabindex="0" aria-label="查看完整榜单" onclick="navigate('charts')" onkeydown="activateKey(event)">完整榜单 <span aria-hidden="true">→</span></a></div><div class="rank-list">${charts.map((album, index) => rankRow(album, index)).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>最新评论</h2><a role="button" tabindex="0" aria-label="进入社区" onclick="navigate('community')" onkeydown="activateKey(event)">进入社区 <span aria-hidden="true">→</span></a></div><div class="community-list">${posts.map(postCard).join('')}</div></section>`;
+    <section class="section releases-section"><div class="section-head"><h2>新作声场</h2><a role="button" tabindex="0" aria-label="查看全部新作" onclick="navigate('discover')" onkeydown="activateKey(event)">全部 <span aria-hidden="true">↗</span></a></div><div class="release-scroller">${newReleases.map(releaseCard).join('')}</div><div class="rail-meter" aria-hidden="true"><span></span></div><div class="rail-caption"><span>按发行时间排列</span><span>滑动探索 <span aria-hidden="true">→</span></span></div></section>
+    <section class="section daily-section"><div class="section-head"><h2>今天听点儿</h2><button class="section-action" type="button" aria-label="换一个推荐" onclick="refreshPick()">换一个 <span aria-hidden="true">↻</span></button></div><div id="dailyPick">${pickView()}</div></section>
+    <section class="section radar-section"><div class="section-head"><h2>私人雷达</h2><a role="button" tabindex="0" aria-label="查看全部私人雷达作品" onclick="navigate('discover')" onkeydown="activateKey(event)">查看全部 <span aria-hidden="true">↗</span></a></div><div class="cards">${editorsPicks.map(albumCard).join('')}</div></section>
+    <section class="section top10-section"><div class="section-head"><h2>今日top10</h2><a role="button" tabindex="0" aria-label="查看完整榜单" onclick="navigate('charts')" onkeydown="activateKey(event)">完整榜单 <span aria-hidden="true">↗</span></a></div><div class="rank-list">${charts.map((album, index) => rankRow(album, index)).join('')}</div></section>
+    <section class="section"><div class="section-head"><h2>声音之外</h2><a role="button" tabindex="0" aria-label="进入社区" onclick="navigate('community')" onkeydown="activateKey(event)">进入社区 <span aria-hidden="true">↗</span></a></div><div class="community-list">${posts.map(postCard).join('')}</div></section>`;
 }
 
 async function loadCharts() {
+  const revision = ++chartRequest;
   const params = new URLSearchParams({ sort: state.chartSort, limit: '50' });
   if (state.chartTab === 'kpop') params.set('genre', 'kpop');
   else if (state.chartTab === 'hiphop') params.set('genre', 'hiphop');
   const data = await safeApi(`/api/charts?${params}`, null);
+  if (revision !== chartRequest) return false;
   state.charts = data && data.items ? data.items : [];
   state.offline = !data;
+  return true;
 }
 
 function rankRow(album, index, context) {
@@ -477,34 +366,35 @@ function rankRow(album, index, context) {
       : state.chartSort === 'popularity'
         ? album.popularity == null
           ? '<span class="rank-heat-none" title="该专辑暂无榜单热度数据">—</span>'
-          : `<span aria-hidden="true">🔥 </span>${heatPercent(album)}%`
+          : `${heatPercent(album)}%`
         : album.score != null ? Number(album.score).toFixed(1) : '—'
     : album.score != null ? Number(album.score).toFixed(1) : '—';
   const sub = `${esc(album.artist)}${album.genre ? ' · ' + esc(album.genre) : ''}${context === 'charts' && album.year ? ' · ' + esc(album.year) : ''}`;
-  return `<div class="rank" role="button" tabindex="0" aria-label="第 ${index + 1} 名 ${esc(album.title || '')} · ${esc(album.artist || '')}" onclick="openItem('${esc(album.id)}')" onkeydown="activateKey(event)"><span class="rank-no" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span><div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${sub}</div></div><span class="score">${metric}</span></div>`;
+  return `<div class="rank" role="button" tabindex="0" aria-label="第 ${index + 1} 名 ${esc(album.title || '')} · ${esc(album.artist || '')}" onclick="openItem('${esc(album.id)}')" onkeydown="activateKey(event)"><span class="rank-no" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>${cover(album, 'rank-cover')}<div><div class="rank-name">${esc(album.title)}</div><div class="rank-artist">${sub}</div></div>${context === 'charts' ? `<span class="score">${metric}</span>` : '<span class="rank-open" aria-hidden="true">↗</span>'}</div>`;
 }
 
 function chartsList() {
   if (!state.charts.length) return emptyState('暂无榜单数据。首次同步完成后将显示真实榜单。');
-  return `<div class="rank-list">${state.charts.map((album, index) => rankRow(album, index, 'charts')).join('')}</div>`;
+  return `${window.HipkopCulture.podium(state.charts, cover, id => state.liked.has(id))}<div class="chart-list-heading"><h2>继续听下去</h2><span>${state.charts.length} 张入榜作品</span></div><div class="rank-list">${state.charts.slice(3).map((album, index) => `${rankRow(album, index + 3, 'charts')}<div class="rank-row-actions">${window.HipkopCulture.actions(album, state.liked.has(album.id))}</div>`).join('')}</div>`;
 }
 
 async function viewCharts() {
   await loadCharts();
-  return `<div class="page-title"><span class="eyebrow">HIPKOP CHARTS</span><h1>榜单</h1><p>综合、HipHop 与 K-POP 分桶，数据来自元数据 Provider 与 Apple 榜单同步。排序口径：热度取 Apple 榜单排名，评分取编辑分。</p>
+  return `<div class="page-title charts-title"><span class="eyebrow">THE CHART STAGE</span><h1>榜单</h1><p class="page-deck">此刻的声音，站上展台。</p><div id="chartInfo">${window.HipkopCulture.chartInfo(state.charts, state.chartSort)}</div></div><section class="chart-controls" aria-label="榜单筛选">
     <div class="chips" role="group" aria-label="榜单分类">${CHART_TABS.map((tab) => `<button class="chip ${state.chartTab === tab.key ? 'active' : ''}" type="button" aria-pressed="${state.chartTab === tab.key}" onclick="setChartTab('${tab.key}')">${esc(tab.label)}</button>`).join('')}</div>
+    <div class="chart-periods" role="group" aria-label="榜单周期"><button type="button" class="period-current" aria-pressed="true">当前快照</button>${['日榜', '周榜', '月榜'].map(label => `<button type="button" disabled title="尚未保存独立周期榜单">${label}</button>`).join('')}<span>历史周期未收录</span></div>
     <div class="sort-row"><label for="chartSort">排序</label><select id="chartSort" onchange="setChartSort(this.value)">
       <option value="popularity" ${state.chartSort === 'popularity' ? 'selected' : ''}>榜单热度</option>
-      <option value="score" ${state.chartSort === 'score' ? 'selected' : ''}>综合评分</option>
+      <option value="score" ${state.chartSort === 'score' ? 'selected' : ''}>目录编辑分</option>
       <option value="date" ${state.chartSort === 'date' ? 'selected' : ''}>最新发行</option>
-    </select></div></div>
+    </select></div></section>
     ${offlineNotice()}<section class="section" id="chartList">${chartsList()}</section>`;
 }
 
 /* -------------------------------- discover -------------------------------- */
 
 function discoverHint() {
-  return '';
+  return '<div class="discover-idle"><span aria-hidden="true">↗</span><p>从一个名字开始。<br><small>艺人、专辑、单曲，都能找到新的入口。</small></p></div>';
 }
 
 function yearTabs() {
@@ -515,10 +405,12 @@ function yearTabs() {
 }
 
 async function loadBrowse() {
+  const revision = ++browseRequest;
   const params = new URLSearchParams({ limit: '40', sort: state.browse.sort });
   if (state.browse.bucket !== 'all') params.set('bucket', state.browse.bucket);
   if (state.browse.year !== 'all') params.set('year', state.browse.year);
   const data = await safeApi(`/api/albums?${params}`, null);
+  if (revision !== browseRequest) return false;
   state.browse.items = data && data.items ? data.items : [];
   return Boolean(data);
 }
@@ -526,6 +418,14 @@ async function loadBrowse() {
 function browseListHtml() {
   if (!state.browse.items.length) return emptyState('这个筛选下还没有作品，换个条件试试。');
   return `<div class="cards">${state.browse.items.map(albumCard).join('')}</div>`;
+}
+
+function filterStatus() {
+  const active = [];
+  if (state.browse.bucket !== 'all') active.push(bucketLabel(state.browse.bucket));
+  if (state.browse.year !== 'all') active.push(state.browse.year);
+  if (state.browse.sort !== 'date') active.push(SORT_TABS.find(item => item.key === state.browse.sort)?.label);
+  return `<span>${active.length ? '筛选已启用 · ' + esc(active.filter(Boolean).join(' / ')) : '全部档案 · 最新发行'} · ${state.browse.items.length} 张作品</span>${active.length ? '<button type="button" onclick="clearBrowseFilters()">一键清除 ↺</button>' : ''}`;
 }
 
 function searchResultsHtml(result) {
@@ -537,74 +437,104 @@ function searchResultsHtml(result) {
       ? `<p class="empty">查询失败：${esc(result.error)}。请稍后重试。</p>`
       : `<p class="empty">未找到「${esc(result.query)}」的结果，请尝试其他关键词。</p>`;
   }
-  const note = result.cached ? '本地目录结果' : `元数据 Provider 结果 · ${esc((result.providers || []).join(', ') || 'provider')}`;
+  const note = result.cached ? '唱片档案' : '新发现';
   return `<div class="discover-hint">${note} · 艺人 ${counts.artists} · 专辑 ${counts.albums} · 单曲 ${counts.tracks}</div>
     <div class="result-group"><h3>艺人 (${counts.artists})</h3>${results.artists.map(artistResult).join('') || emptyState('无匹配艺人')}</div>
     <div class="result-group"><h3>专辑 (${counts.albums})</h3><div class="cards">${results.albums.map(albumCard).join('') || emptyState('无匹配专辑')}</div></div>
-    <div class="result-group"><h3>单曲 (${counts.tracks})</h3>${results.tracks.slice(0, 12).map((track, index) => trackRow(track, index)).join('') || emptyState('无匹配单曲')}</div>`;
+    <div class="result-group"><h3>单曲 (${counts.tracks})</h3>${results.tracks.slice(0, 12).map((track, index) => `<div class="search-track">${trackRow(track, index, { listen: false, thumbnail: true })}${window.HipkopCulture.actions(track, state.liked.has(track.id))}</div>`).join('') || emptyState('无匹配单曲')}</div>`;
 }
 
 async function viewDiscover() {
-  await loadBrowse();
+  const [loaded, hiphop, kpop] = await Promise.all([
+    loadBrowse(), safeApi('/api/albums?bucket=hiphop&sort=date&limit=8', null),
+    safeApi('/api/albums?bucket=kpop&sort=date&limit=8', null)
+  ]);
+  state.offline = !loaded;
+  state.archivePicks = [...(hiphop?.items || []), ...(kpop?.items || [])];
   const years = yearTabs();
   const chips = (tabs, key, setter, groupLabel) =>
     `<div class="chips" role="group" aria-label="${esc(groupLabel)}">${tabs.map((tab) => `<button class="chip ${key === tab.key ? 'active' : ''}" type="button" aria-pressed="${key === tab.key}" onclick="${setter}('${tab.key}')">${esc(tab.label)}</button>`).join('')}</div>`;
-  return `<div class="page-title"><span class="eyebrow">DISCOVER</span><h1>发现</h1><p>搜索任意艺人，或按风格 / 场景 / 年份筛选新发行。</p></div>
-    <section class="section discover-search"><div class="inline-search"><input id="discoverInput" aria-label="搜索艺人、专辑、单曲或组合" placeholder="搜索艺人、专辑、单曲或组合" oninput="onDiscoverInput()"><button type="button" onclick="runDiscover()">搜索</button></div><div id="discoverResults" role="region" aria-label="搜索结果">${searchResultsHtml(state.discover)}</div></section>
+  return `<div class="page-title"><span class="eyebrow">THE RECORD ARCHIVE</span><h1>发现<span class="page-word">声场</span></h1><p>从一个名字，找到新的频率。</p></div>
+    <section class="section discover-search"><form class="inline-search" onsubmit="event.preventDefault();runDiscover()"><input id="discoverInput" value="${esc(state.discover?.query || '')}" aria-label="搜索艺人、专辑、单曲或组合" placeholder="搜索艺人、专辑、单曲或组合" oninput="onDiscoverInput()" type="search"><button type="submit">搜索</button></form><div id="discoverResults" role="region" aria-label="搜索结果" aria-live="polite">${searchResultsHtml(state.discover)}</div></section>
+    ${window.HipkopCulture.archive(state.archivePicks, cover, id => state.liked.has(id))}
     ${offlineNotice()}
-    <section class="section" id="browseSection"><div class="section-head"><h2>筛选</h2></div>
+    <section class="section archive-filter" id="browseSection"><div class="section-head"><h2>唱片索引</h2></div>
       <div class="filter-block"><label>风格</label>${chips(BUCKET_TABS, state.browse.bucket, 'setBrowseBucket', '风格筛选')}</div>
       <div class="filter-block"><label>年份</label>${chips(years, state.browse.year, 'setBrowseYear', '年份筛选')}</div>
       <div class="sort-row"><label for="browseSort">排序</label><select id="browseSort" onchange="setBrowseSort(this.value)">${SORT_TABS.map((tab) => `<option value="${tab.key}" ${state.browse.sort === tab.key ? 'selected' : ''}>${esc(tab.label)}</option>`).join('')}</select></div>
-      <div id="browseResults">${browseListHtml()}</div>
+      <div id="filterStatus" role="status">${filterStatus()}</div><div id="browseResults" aria-live="polite">${browseListHtml()}</div>
     </section>`;
 }/* -------------------------------- community -------------------------------- */
 
 async function loadCommunity() {
+  const revision = ++communityRequest;
   const data = await safeApi(`/api/community/posts?topic=${encodeURIComponent(state.community.topic)}&limit=40`, null);
+  if (revision !== communityRequest) return false;
   state.community.items = data && data.items ? data.items : state.community.topic === 'all' ? FALLBACK_POSTS : [];
   if (data && data.topics) state.community.topics = data.topics;
   state.offline = !data;
+  return true;
 }
 
 async function viewCommunity() {
   await loadCommunity();
   const topics = state.community.topics.length ? state.community.topics : DEFAULT_TOPICS;
-  return `<div class="page-title"><span class="eyebrow">COMMUNITY</span><h1>社区</h1><p>和同样热爱 HipHop 与 K-POP 的人，分享演出、新作和你的宝藏安利。</p><button class="cta" type="button" onclick="openPostComposer()"><span aria-hidden="true">＋</span> 发布内容</button></div>
+  return `<div class="page-title"><span class="eyebrow">VOICES FROM THE FLOOR</span><h1>同频<span class="page-word">社区</span></h1><p>新作、现场、私藏。好音乐，值得聊。</p><button class="cta" type="button" aria-label="发布内容：写一帖" onclick="openPostComposer()"><span aria-hidden="true">＋</span> 写一帖</button></div>
     ${offlineNotice()}
-    <section class="section"><div class="chips" role="group" aria-label="社区话题">${topics.map((topic) => `<button class="chip ${state.community.topic === topic.key ? 'active' : ''}" type="button" aria-pressed="${state.community.topic === topic.key}" onclick="setCommunityTopic('${topic.key}')">${esc(topic.label)}</button>`).join('')}</div>
-      <div class="community-list">${state.community.items.map(postCard).join('') || emptyState('这个话题下还没有帖子，来发第一帖。')}</div></section>`;
+    <section class="section wall-section"><div class="chips" role="group" aria-label="社区话题">${topics.map((topic) => `<button class="chip ${state.community.topic === topic.key ? 'active' : ''}" type="button" aria-pressed="${state.community.topic === topic.key}" onclick="setCommunityTopic('${topic.key}')">${esc(topic.label)}</button>`).join('')}</div>
+      <div class="wall-heading"><span>文化留言墙</span><span id="communityCount">${state.community.items.length} 段声音 · 当前分类</span></div><div id="communityFeed" class="community-list" aria-live="polite">${window.HipkopCulture.wall(state.community.items, topicLabel)}</div></section>`;
 }
 
 /* --------------------------------- profile -------------------------------- */
 
+function loadFavorites() {
+  try { return JSON.parse(localStorage.getItem('hipkop.favorites.v1') || '{}'); }
+  catch { return {}; }
+}
+
 function viewProfile() {
-  return `<div class="page-title"><span class="eyebrow">MY HIPKOP</span><h1>我的</h1></div><div class="profile-card"><div class="avatar" aria-hidden="true">H</div><div><h2>游客</h2><p>登录后同步你的收藏、乐评与关注</p></div></div><div class="menu"><div class="menu-item" role="button" tabindex="0" aria-label="我的收藏" onclick="toast('收藏夹为空')" onkeydown="activateKey(event)">我的收藏 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="我的乐评" onclick="toast('登录后查看我的乐评')" onkeydown="activateKey(event)">我的乐评 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="消息通知" onclick="toast('暂无通知')" onkeydown="activateKey(event)">消息通知 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="目录与 Provider 状态" onclick="showStatus()" onkeydown="activateKey(event)">目录与 Provider 状态 <span aria-hidden="true">→</span></div><div class="menu-item" role="button" tabindex="0" aria-label="关于 HIPKOP PLAYER" onclick="toast('HIPKOP PLAYER v0.3 · 元数据目录')" onkeydown="activateKey(event)">关于 HIPKOP PLAYER <span aria-hidden="true">→</span></div></div>`;
+  const saved = Object.values(loadFavorites());
+  return `<div class="page-title profile-title"><span class="eyebrow">YOUR LISTENING ARCHIVE</span><h1>我的<span class="page-word">唱片架</span></h1><p>留下喜欢的，下次接着听。</p></div>
+    <div class="profile-card"><div class="avatar" aria-hidden="true"><img src="/hipkop-logo.svg" alt="" width="56" height="56"></div><div><h2>私藏 ${saved.length}</h2><p>收藏保存在这台设备</p></div><button type="button" class="ghost" onclick="navigate('discover')">找张唱片 ↗</button></div>
+    <section class="section collection-section"><div class="section-head"><h2>私藏唱片</h2></div><div class="cards" id="collectionList">${saved.length ? saved.map(albumCard).join('') : emptyState('还没有私藏。打开一张作品，点一下收藏。')}</div></section>
+    <div class="menu"><button class="menu-item" type="button" onclick="navigate('community')">去同频社区 <span aria-hidden="true">↗</span></button><button class="menu-item" type="button" onclick="showStatus()">目录状态 <span aria-hidden="true">↗</span></button></div>`;
 }
 
 /* ------------------------------ navigation -------------------------------- */
 
 async function paint() {
+  const revision = ++renderRevision;
+  window.HipkopMotion?.clear();
   const view = $('#view');
   document.querySelectorAll('.tabbar button').forEach((button) => {
-    const active = button.dataset.tab === state.page;
+    const active = button.getAttribute('data-tab') === state.page;
     button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
   if (view) view.setAttribute('aria-busy', 'true');
   try {
-    if (state.page === 'home') view.innerHTML = await viewHome();
-    else if (state.page === 'charts') view.innerHTML = await viewCharts();
-    else if (state.page === 'discover') view.innerHTML = await viewDiscover();
-    else if (state.page === 'community') view.innerHTML = await viewCommunity();
-    else if (state.page === 'profile') view.innerHTML = viewProfile();
+    let html;
+    if (state.page === 'home') html = await viewHome();
+    else if (state.page === 'charts') html = await viewCharts();
+    else if (state.page === 'discover') html = await viewDiscover();
+    else if (state.page === 'community') html = await viewCommunity();
+    else if (state.page === 'profile') html = viewProfile();
+    if (revision === renderRevision && html != null) view.innerHTML = html;
   } finally {
-    if (view) view.removeAttribute('aria-busy');
+    if (revision === renderRevision) {
+      if (view) view.removeAttribute('aria-busy');
+      window.HipkopExhibition?.syncPlayer();
+      window.HipkopCulture?.syncPlayback();
+      window.HipkopMotion?.mount(view);
+    }
   }
 }
 
 async function navigate(page) {
+  clearTimeout(discoverTimer);
+  searchRequest++;
+  window.HipkopMotion?.clear();
   if (page !== 'detail' && page !== 'artist') state.page = page;
   const view = $('#view');
   if (view && ['home', 'charts', 'discover', 'community'].includes(page)) view.innerHTML = loading();
@@ -622,15 +552,23 @@ function backFromDetail() {
 /* -------------------------------- details --------------------------------- */
 
 async function openItem(id) {
+  if (!id || /^(undefined|null)$/.test(String(id))) return toast('这张作品还未入档');
+  closeSheet();
+  const revision = ++renderRevision;
+  window.HipkopMotion?.clear();
+  window.scrollTo({ top: 0, behavior: 'instant' });
   const previous = ['detail', 'artist'].includes(state.page) ? state.lastDetail.page : state.page;
   state.lastDetail = { page: previous || 'home', id };
   state.page = 'detail';
   const view = $('#view');
   view.setAttribute('aria-busy', 'true');
   view.innerHTML = loading('正在打开详情…');
-  const data = await safeApi(`/api/albums/${encodeURIComponent(id)}`, null);
+  const isTrack = String(id).includes('-track-') || state.discover?.results?.tracks?.some(track => track.id === id);
+  const data = isTrack ? null : await safeApi(`/api/albums/${encodeURIComponent(id)}`, null);
+  if (revision !== renderRevision) return;
   if (!data || !data.album) {
     const trackData = await safeApi(`/api/tracks/${encodeURIComponent(id)}`, null);
+    if (revision !== renderRevision) return;
     if (trackData && trackData.track) return renderTrack(trackData);
     view.removeAttribute('aria-busy');
     view.innerHTML = `${offlineNotice()}${emptyState('无法加载该作品，可能尚未同步。')}${backButton()}`;
@@ -656,13 +594,15 @@ function renderAlbum(data) {
       <h1>${esc(album.title)}</h1>${artistLink}
       <div class="detail-meta"><span>发行日期 <b>${esc(album.releaseDate || '待同步')}</b></span><span>曲目 <b>${tracks.length || album.trackCount || 0}</b></span><span>评分 <b>${album.score != null ? Number(album.score).toFixed(1) : '—'}</b></span></div>
       ${listenCta(album)}
-      <button class="ghost" type="button" aria-pressed="${liked}" aria-label="${liked ? '取消收藏' : '收藏'} ${esc(album.title)}" onclick="toggleLike('${esc(album.id)}')">${liked ? '♥ 已收藏' : '♡ 收藏'}</button>
+      <button class="ghost" type="button" aria-pressed="${liked}" aria-label="${liked ? '取消收藏' : '收藏'} ${esc(album.title)}" data-like-id="${esc(album.id)}" onclick="toggleLike('${esc(album.id)}')">${liked ? '♥ 已收藏' : '♡ 收藏'}</button>
     </div></div>
-    <div class="review-box"><b>HIPKOP 编辑短评</b><p>${esc(album.desc || `${album.title} · ${album.artist}`)}</p>
+    <div class="review-box"><b>作品笔记</b><p>${esc(album.desc || '这张作品暂无介绍。从曲目开始听。')}</p>
       <div class="track-box"><h3>曲目列表 (${tracks.length})</h3>${tracks.length ? tracks.map((track, index) => trackRow(track, index)).join('') : '<p class="single-meta">曲目尚未同步，正在后台获取。</p>'}</div>
       ${artists && artists.length ? `<p class="single-meta">艺人：${artistLinks}</p>` : ''}
     </div></div>`;
+  window.scrollTo({ top: 0, behavior: 'instant' });
   $('#view').removeAttribute('aria-busy');
+  window.HipkopMotion?.mount($('#view'));
 }
 
 function renderTrack(data) {
@@ -677,14 +617,21 @@ function renderTrack(data) {
       ${artists && artists.length ? `<div class="artist" role="button" tabindex="0" aria-label="查看艺人 ${esc(track.artist)}" onclick="artistDetail('${esc(artists[0].id)}')" onkeydown="activateKey(event)">${esc(track.artist)}</div>` : `<div class="artist">${esc(track.artist)}</div>`}
       <div class="detail-meta"><span>发行日期 <b>${esc(track.releaseDate || '待同步')}</b></span><span>时长 <b>${track.durationMs ? Math.round(track.durationMs / 1000) + 's' : '—'}</b></span></div>
       ${listenCta(track)}
-      <button class="ghost" type="button" aria-pressed="${liked}" aria-label="${liked ? '取消收藏' : '收藏'} ${esc(track.title)}" onclick="toggleLike('${esc(track.id)}')">${liked ? '♥ 已收藏' : '♡ 收藏'}</button>
+      <button class="ghost" type="button" aria-pressed="${liked}" aria-label="${liked ? '取消收藏' : '收藏'} ${esc(track.title)}" data-like-id="${esc(track.id)}" onclick="toggleLike('${esc(track.id)}')">${liked ? '♥ 已收藏' : '♡ 收藏'}</button>
     </div></div>
     <div class="review-box"><b>所属专辑</b>${album ? `<p class="single-meta" role="button" tabindex="0" aria-label="打开专辑 ${esc(album.title)}" onclick="openItem('${esc(album.id)}')" onkeydown="activateKey(event)">${esc(album.title)} · ${esc(album.artist)}</p>` : '<p class="single-meta">未关联专辑</p>'}
     ${track.previewUrl ? `<p class="single-meta"><a href="${esc(track.previewUrl)}" target="_blank" rel="noopener">试听片段 <span aria-hidden="true">↗</span></a></p>` : ''}</div></div>`;
+  window.scrollTo({ top: 0, behavior: 'instant' });
   $('#view').removeAttribute('aria-busy');
+  window.HipkopMotion?.mount($('#view'));
 }
 
 async function artistDetail(id) {
+  if (!id || /^(undefined|null)$/.test(String(id))) return toast('艺人资料还未入档');
+  closeSheet();
+  const revision = ++renderRevision;
+  window.HipkopMotion?.clear();
+  window.scrollTo({ top: 0, behavior: 'instant' });
   const previous = ['detail', 'artist'].includes(state.page) ? state.lastDetail.page : state.page;
   state.lastDetail = { page: previous || 'home', id };
   state.page = 'artist';
@@ -692,6 +639,7 @@ async function artistDetail(id) {
   view.setAttribute('aria-busy', 'true');
   view.innerHTML = loading('正在加载艺人资料…');
   const data = await safeApi(`/api/artists/${encodeURIComponent(id)}`, null);
+  if (revision !== renderRevision) return;
   if (!data || !data.artist) {
     view.removeAttribute('aria-busy');
     view.innerHTML = `${offlineNotice()}${emptyState('无法加载艺人资料。')}${backButton()}`;
@@ -701,7 +649,7 @@ async function artistDetail(id) {
   const { artist, albums, tracks } = data;
   const tags = [artist.genre, bucketLabel(artist.genreBucket), artist.region].filter(Boolean).join(' · ');
   view.innerHTML = `<div class="artist-page">${backButton()}
-    <div class="artist-hero" style="background-image:url('${esc(artist.heroUrl)}')"><div class="artist-overlay"></div>
+    <div class="artist-hero" style="background-image:url('${esc(window.HipkopCulture.resource(artist.heroUrl))}')"><div class="artist-overlay"></div>
       <div class="artist-info">${avatar(artist)}<div>
         <span class="eyebrow">${esc(tags || '艺人')}</span>
         <h1>${esc(artist.name)}</h1><p>${esc(artist.bio || '暂无简介，资料来自元数据 Provider。')}</p>
@@ -710,7 +658,9 @@ async function artistDetail(id) {
     ${offlineNotice()}
     <section class="section"><div class="section-head"><h2>代表专辑 (${albums.length})</h2></div><div class="cards">${albums.length ? albums.map(albumCard).join('') : emptyState('暂无关联专辑')}</div></section>
     <section class="section"><div class="section-head"><h2>关联单曲 (${tracks.length})</h2></div><div class="track-box">${tracks.length ? tracks.slice(0, 12).map((track, index) => trackRow(track, index, { listen: false })).join('') : emptyState('暂无关联单曲')}</div></section></div>`;
+  window.scrollTo({ top: 0, behavior: 'instant' });
   view.removeAttribute('aria-busy');
+  window.HipkopMotion?.mount(view);
 }/* ------------------------------ interactions ------------------------------ */
 
 function followArtist() {
@@ -719,32 +669,129 @@ function followArtist() {
 
 function randomPick() {
   const pool = pickPool();
-  const currentId = state.pick && state.pick.id;
+  const currentId = (state.pick || dailyPick())?.id;
   const choices = pool.length > 1 && currentId ? pool.filter((item) => item.id !== currentId) : pool;
   const source = choices.length ? choices : pool;
   state.pick = source[Math.floor(Math.random() * source.length)];
   return state.pick;
 }
 
-function toggleLike(id) {
-  state.liked.has(id) ? state.liked.delete(id) : state.liked.add(id);
-  toast(state.liked.has(id) ? '已加入收藏' : '已取消收藏');
-  if (state.page === 'detail' && state.detail.kind === 'track') renderTrack({ track: state.detail.item, album: null, artists: state.detail.artists });
+function refreshPick() {
+  randomPick();
+  const root = $('#dailyPick');
+  if (!root) return;
+  root.innerHTML = pickView();
+  window.HipkopMotion?.pick(root);
+}
+
+function knownWork(id) {
+  return state.detail.item?.id === id ? state.detail.item : [
+    ...state.releases, ...state.charts, ...state.browse.items, ...state.archivePicks,
+    ...(state.discover?.results?.albums || []), ...(state.discover?.results?.tracks || [])
+  ].find(work => work.id === id);
+}
+
+async function toggleLike(id) {
+  const favorites = loadFavorites();
+  if (state.liked.has(id)) {
+    state.liked.delete(id);
+    delete favorites[id];
+  } else {
+    let item = knownWork(id);
+    if (!item && id) {
+      const data = await safeApi(`/api/${String(id).includes('-track-') ? 'tracks' : 'albums'}/${encodeURIComponent(id)}`, null);
+      item = data?.album || data?.track;
+    }
+    if (!item) return toast('暂时无法收藏这张作品');
+    state.liked.add(id);
+    favorites[id] = item;
+  }
+  try { localStorage.setItem('hipkop.favorites.v1', JSON.stringify(favorites)); }
+  catch { toast('设备存储空间不足，收藏未保存'); return; }
+  const liked = state.liked.has(id);
+  document.querySelectorAll('[data-like-id]').forEach(button => {
+    if (button.getAttribute('data-like-id') !== id) return;
+    button.setAttribute('aria-pressed', String(liked));
+    button.setAttribute('aria-label', liked ? '取消收藏' : '收藏');
+    button.textContent = liked ? '♥ 已收藏' : '♡ 收藏';
+  });
+  toast(liked ? '已放进唱片架' : '已移出唱片架');
+}
+
+async function playWork(id) {
+  const current = window.HipkopPlayer?.snapshot();
+  if (current && (current.id === id || current.item?.albumId === id) && ['playing', 'paused'].includes(current.status)) return window.HipkopPlayer.toggle();
+  const item = knownWork(id);
+  await window.HipkopPlayer?.playItem(item || id);
+}
+
+async function toggleExhibitionPlayback() {
+  const player = window.HipkopPlayer;
+  if (!player) return toast('播放器还未加载，请刷新重试');
+  const status = player.snapshot().status;
+  if (status === 'playing' || status === 'paused') return player.toggle();
+  return player.playQueue(state.hero.length ? state.hero : state.releases);
+}
+
+function openExhibitionQueue() {
+  const items = state.hero.length ? state.hero : state.releases;
+  openSheet(`<h3>声场精选</h3><p class="sheet-sub">HIP-HOP × K-POP，换一种频率听。</p><button class="cta" type="button" onclick="closeSheet();window.HipkopPlayer.playQueue(state.hero.length ? state.hero : state.releases)">播放整组试听 ↗</button><div class="exhibition-queue">${items.map((work, index) => `<div class="queue-row"><button type="button" class="queue-work" onclick="closeSheet();openItem('${esc(work.id)}')"><span>${String(index + 1).padStart(2,'0')}</span>${cover(work)}<span><b>${esc(work.title)}</b><small>${esc(work.artist)}</small></span></button><button class="track-preview" type="button" onclick="playWork('${esc(work.id)}')" aria-label="播放 ${esc(work.title)} 试听"><span class="play-shape" aria-hidden="true"></span></button></div>`).join('')}</div>`);
 }
 
 async function setChartTab(key) {
   state.chartTab = key;
-  await paint();
+  return updateCharts();
 }
 
 async function setChartSort(sort) {
   state.chartSort = sort;
-  await paint();
+  return updateCharts();
+}
+
+async function updateCharts() {
+  const root = $('#chartList');
+  if (!root) return;
+  document.querySelectorAll('[aria-label="榜单分类"] .chip').forEach(button => {
+    const active = button.getAttribute('onclick') === `setChartTab('${state.chartTab}')`;
+    button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+  });
+  root.setAttribute('aria-busy', 'true');
+  const loaded = await loadCharts();
+  if (!loaded || !root.isConnected || state.page !== 'charts') return;
+  root.innerHTML = chartsList();
+  $('#chartInfo').innerHTML = window.HipkopCulture.chartInfo(state.charts, state.chartSort);
+  root.removeAttribute('aria-busy');
+  window.HipkopCulture.syncPlayback();
+  window.HipkopMotion?.results(root);
 }
 
 async function setBrowse(key, value) {
   state.browse[key] = value;
-  await paint();
+  const root = $('#browseResults');
+  if (!root) return;
+  for (const [group, setter, selected] of [['风格筛选', 'setBrowseBucket', state.browse.bucket], ['年份筛选', 'setBrowseYear', state.browse.year]]) {
+    document.querySelectorAll(`[aria-label="${group}"] .chip`).forEach(button => {
+      const active = button.getAttribute('onclick') === `${setter}('${selected}')`;
+      button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+    });
+  }
+  root.setAttribute('aria-busy', 'true');
+  const expected = browseRequest + 1;
+  const loaded = await loadBrowse();
+  if (expected !== browseRequest || !root.isConnected || state.page !== 'discover') return;
+  // An unavailable server still gets a useful empty/error state.
+  if (!loaded && root !== $('#browseResults')) return;
+  root.innerHTML = loaded ? browseListHtml() : emptyState('唱片索引暂时离线，请稍后重试。');
+  root.removeAttribute('aria-busy');
+  $('#filterStatus').innerHTML = filterStatus();
+  window.HipkopCulture.syncPlayback();
+  window.HipkopMotion?.results(root);
+}
+
+function clearBrowseFilters() {
+  state.browse.bucket = 'all'; state.browse.year = 'all'; state.browse.sort = 'date';
+  if ($('#browseSort')) $('#browseSort').value = 'date';
+  return setBrowse('bucket', 'all');
 }
 
 function setBrowseBucket(value) {
@@ -761,7 +808,25 @@ function setBrowseSort(value) {
 
 async function setCommunityTopic(topic) {
   state.community.topic = topic;
-  await paint();
+  const root = $('#communityFeed');
+  if (!root) return;
+  document.querySelectorAll('[aria-label="社区话题"] .chip').forEach(button => {
+    const active = button.getAttribute('onclick') === `setCommunityTopic('${topic}')`;
+    button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+  });
+  root.setAttribute('aria-busy', 'true');
+  const loaded = await loadCommunity();
+  if (!loaded || !root.isConnected || state.page !== 'community') return;
+  root.innerHTML = window.HipkopCulture.wall(state.community.items, topicLabel);
+  root.removeAttribute('aria-busy');
+  $('#communityCount').textContent = `${state.community.items.length} 段声音 · 当前分类`;
+  window.HipkopMotion?.results(root);
+}
+
+function openCommunityPost(id) {
+  const post = state.community.items.find(item => String(item.id) === String(id));
+  if (!post) return toast('这段声音暂时不在当前墙面');
+  openSheet(`<div class="post-detail"><span class="eyebrow">同频社区 / ${esc(topicLabel(post.topic))}</span>${window.HipkopCulture.post(post, topicLabel(post.topic))}<button class="ghost" type="button" onclick="closeSheet()">收起这段声音</button></div>`);
 }
 
 /* --------------------------------- sheet ---------------------------------- */
@@ -817,6 +882,7 @@ function openSheet(html) {
   sheet.setAttribute('role', 'dialog');
   sheet.setAttribute('aria-modal', 'true');
   sheet.setAttribute('aria-hidden', 'false');
+  window.HipkopMotion?.sheet(card);
   if (typeof document !== 'undefined' && document.body) document.body.style.overflow = 'hidden';
   document.removeEventListener('keydown', handleSheetKeydown, true);
   document.addEventListener('keydown', handleSheetKeydown, true);
@@ -854,10 +920,13 @@ function openListenById(id) {
 
 function openPostComposer() {
   const topics = (state.community.topics.length ? state.community.topics : DEFAULT_TOPICS).filter((topic) => topic.key !== 'all');
+  const works = [...new Map([...state.releases, ...state.charts, ...state.browse.items].map(item => [item.id, item])).values()].slice(0, 50);
   openSheet(`<h3>发布内容</h3>
     <label class="field"><span>话题</span><select id="postTopic">${topics.map((topic) => `<option value="${topic.key}" ${state.community.topic === topic.key ? 'selected' : ''}>${esc(topic.label)}</option>`).join('')}</select></label>
     <label class="field"><span>标题</span><input id="postTitle" maxlength="120" placeholder="一句话说清你想聊什么"></label>
     <label class="field"><span>正文</span><textarea id="postBody" rows="4" maxlength="2000" placeholder="展开说说，或者安利你的宝藏歌手 / 歌曲…"></textarea></label>
+    <label class="field"><span>署名（可选）</span><input id="postAuthor" maxlength="60" placeholder="不填写则显示 HIPKOP 听众"></label>
+    <label class="field"><span>附张唱片（可选）</span><select id="postAlbum"><option value="">不关联作品</option>${works.map(item => `<option value="${esc(item.id)}">${esc(item.title)} — ${esc(item.artist)}</option>`).join('')}</select></label>
     <button class="cta" type="button" onclick="submitPost(this)">发布</button>`);
 }
 
@@ -878,7 +947,7 @@ async function submitPost(button) {
     const response = await fetch('/api/community/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, title, body })
+      body: JSON.stringify({ topic, title, body, author: $('#postAuthor').value.trim(), albumId: $('#postAlbum').value || null })
     });
     if (!response.ok) throw new Error(`http_${response.status}`);
   } catch (error) {
@@ -922,10 +991,13 @@ function toast(message) {
 let discoverTimer = null;
 function onDiscoverInput() {
   clearTimeout(discoverTimer);
+  searchRequest++;
   discoverTimer = setTimeout(() => runDiscover(), 350);
 }
 
 async function runDiscover(explicitQuery) {
+  clearTimeout(discoverTimer);
+  const revision = ++searchRequest;
   const root = $('#discoverResults');
   if (!root) return;
   const query = (explicitQuery != null ? explicitQuery : $('#discoverInput') ? $('#discoverInput').value : '').trim();
@@ -937,11 +1009,14 @@ async function runDiscover(explicitQuery) {
   root.setAttribute('aria-busy', 'true');
   root.innerHTML = '<div class="skeleton skeleton-line"></div><div class="skeleton skeleton-card"></div>';
   const data = await safeApi(`/api/search?q=${encodeURIComponent(query)}`, null);
+  if (revision !== searchRequest || !root.isConnected || state.page !== 'discover') return;
   state.discover = data || { query, counts: { artists: 0, albums: 0, tracks: 0 }, results: { artists: [], albums: [], tracks: [] }, error: 'network' };
   const current = $('#discoverResults');
   if (current) {
     current.innerHTML = searchResultsHtml(state.discover);
     current.removeAttribute('aria-busy');
+    window.HipkopCulture.syncPlayback();
+    window.HipkopMotion?.results(current);
   }
 }
 
