@@ -1,0 +1,28 @@
+# HTTPS reverse proxy in front of the HIPKOP container.
+#
+#   caddy run --config deploy/Caddyfile
+#
+# Replace the hostname, then point an A record at the server. Caddy fetches the
+# TLS certificate automatically.
+#
+# The app has no login of its own and the community feed accepts writes, so the
+# basic_auth block below is not optional on a public hostname.
+
+hipkop.example.com {
+	encode zstd gzip
+
+	basic_auth {
+		hipkop $2a$14$REPLACE_WITH_A_CADDY_HASH
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

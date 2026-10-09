@@ -16,11 +16,15 @@
 //   POST /api/sync/search | /api/sync/album/:id | /api/sync/artist/:id
 //   POST /api/sync/releases | /api/sync/charts | /api/sync/calibrate
 //
+// Every /api/sync/* route is gated by HIPKOP_ADMIN_TOKEN when that variable is
+// set (x-hipkop-token header or ?token=); reads and the community feed stay open.
+//
 // Albums and tracks carry `listen.platforms` (QQ Music / NetEase / Apple Music)
 // so the client can jump straight to the full song instead of a 30s preview.
 // Images are always exposed through /media/... so the browser never hotlinks a
 // third-party host.
 
+const crypto = require('node:crypto');
 const repo = require('./repo');
 const providers = require('./providers');
 const search = require('./search');
@@ -121,6 +125,20 @@ const json = (res, data, status = 200) => {
 };
 
 const fail = (res, status, code, message) => json(res, { error: code, message: message || code }, status);
+
+// Sync routes write to the catalog and fan out to upstream providers, so a
+// public host must not leave them open — anyone could turn the deployment into
+// a free metadata proxy. Set HIPKOP_ADMIN_TOKEN to require the x-hipkop-token
+// header (or ?token=). Unset means open, which is what local development and
+// the test suite rely on.
+const adminToken = config.adminToken || '';
+const tokenMatches = (candidate) => {
+  const expected = Buffer.from(adminToken);
+  const actual = Buffer.from(String(candidate || ''));
+  return actual.length === expected.length && crypto.timingSafeEqual(expected, actual);
+};
+const syncAuthorized = (req, url) =>
+  !adminToken || tokenMatches(req.headers['x-hipkop-token']) || tokenMatches(url.searchParams.get('token'));
 
 const readBody = (req) =>
   new Promise((resolve) => {
@@ -381,6 +399,10 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/charts') { handleCharts(url, res); return true; }
   if (pathname === '/api/community/posts' && method === 'GET') { handlePosts(url, res); return true; }
   if (pathname === '/api/community/posts' && method === 'POST') { await handleCreatePost(req, res); return true; }
+  if (pathname.startsWith('/api/sync/') && !syncAuthorized(req, url)) {
+    fail(res, 401, 'unauthorized', 'sync endpoints require HIPKOP_ADMIN_TOKEN');
+    return true;
+  }
   if (pathname === '/api/sync/jobs') {
     json(res, { jobs: repo.listJobs(clampInt(url.searchParams.get('limit'), 50, 1, 200)) });
     return true;

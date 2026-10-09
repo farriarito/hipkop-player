@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+dist
+data
+tmp
+out_wx0870e45bb54e96f1
+*.log
+.env
+.env.local
+docs
+tests
+/*.png
+typecheck-errors.txt

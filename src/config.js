@@ -33,8 +33,10 @@ const agentModel =
 
 module.exports = {
   root,
-  port: Number(env.HIPKOP_PLAYER_PORT || 4180),
-  host: env.HIPKOP_PLAYER_HOST || '127.0.0.1',
+  // Managed platforms inject PORT and expect the process to bind every
+  // interface; a plain local run stays on loopback.
+  port: Number(env.HIPKOP_PLAYER_PORT || env.PORT || 4180),
+  host: env.HIPKOP_PLAYER_HOST || (env.PORT && !env.HIPKOP_PLAYER_PORT ? '0.0.0.0' : '127.0.0.1'),
   publicDir: path.join(root, 'public'),
   dbPath: env.HIPKOP_DB_PATH || path.join(root, 'data', 'hipkop.sqlite'),
   dbUrl: env.HIPKOP_DB_URL || '',
@@ -92,6 +94,9 @@ module.exports = {
   agentTimeoutMs: Number(env.HIPKOP_AGENT_TIMEOUT_MS || 30000),
   agentMinConfidence: Number(env.HIPKOP_AGENT_MIN_CONFIDENCE || 0.7),
   agentBatchSize: Number(env.HIPKOP_AGENT_BATCH || 50),
+
+  // Public deployments: gates /api/sync/* (see src/api.js). Empty = open.
+  adminToken: env.HIPKOP_ADMIN_TOKEN || '',
 
   // Caching
   cacheTtlMs: Number(env.HIPKOP_CACHE_TTL_HOURS || 24) * 3600 * 1000,

@@ -1,0 +1,28 @@
+# HIPKOP PLAYER — one-command deploy.
+#
+#   cp .env.example .env      # optional: add DEEPSEEK_API_KEY for the taxonomy agent
+#   docker compose up -d --build
+#   curl -s http://127.0.0.1:8080/api/health
+#
+# First boot on an empty catalog queues a releases + charts scan by itself, so
+# real covers show up within a few minutes without any manual seeding.
+services:
+  hipkop:
+    build: .
+    image: hipkop-player:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HIPKOP_PLAYER_HOST: 0.0.0.0
+      HIPKOP_PLAYER_PORT: "8080"
+      HIPKOP_DB_PATH: /data/hipkop.sqlite
+      HIPKOP_MEDIA_DIR: /data/media
+    ports:
+      - "8080:8080"
+    volumes:
+      - hipkop-data:/data
+
+volumes:
+  hipkop-data:
