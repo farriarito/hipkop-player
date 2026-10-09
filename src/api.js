@@ -121,34 +121,41 @@ const serializeTrack = (track, extra = {}) => {
 // how the payload gets stored without threading a request object everywhere.
 const cacheContext = new WeakMap();
 
+// Two clocks, deliberately independent:
+//   ttlSeconds        how long the server may reuse this payload
+//   clientTtlSeconds  how long a browser may reuse it without asking again
+// Catalog reads can afford a client max-age - they only change on a sync. Anything
+// a visitor just wrote cannot: their own next read has to show it.
 const json = (res, data, status = 200, ttlSeconds = 0) => {
   const context = cacheContext.get(res);
   const ttl = ttlSeconds || (context ? context.ttlSeconds : 0);
+  const clientTtl = context ? context.clientTtlSeconds : ttlSeconds;
   if (context && status === 200 && ttl > 0 && data && !data.error) {
     void cache.set(context.cacheKey, data, ttl * 1000);
   }
   // Only a successful read is publicly cacheable; a 404 or an error must not be
   // pinned in a shared cache.
-  const fresh = status === 200 && ttl > 0;
+  const fresh = status === 200 && clientTtl > 0;
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': fresh
-      ? `public, max-age=${ttl}, stale-while-revalidate=${ttl * 2}`
+      ? `public, max-age=${clientTtl}, stale-while-revalidate=${clientTtl * 2}`
       : 'no-store'
   });
   res.end(JSON.stringify(data));
 };
 
-// Read-through wrapper for the expensive GETs: the browser gets its own
-// max-age, and the process-level cache keeps repeat loads off SQLite.
-async function serveCached(res, namespace, key, ttlSeconds, produce) {
+// Read-through wrapper for the expensive GETs: the process-level cache keeps
+// repeat loads off SQLite, and the browser gets its own max-age when the payload
+// is safe to reuse without asking the server again.
+async function serveCached(res, namespace, key, ttlSeconds, produce, clientTtlSeconds = ttlSeconds) {
   const cacheKey = await cache.keyFor(namespace, key);
   const hit = await cache.get(cacheKey);
   if (hit !== undefined) {
-    json(res, hit, 200, ttlSeconds);
+    json(res, hit, 200, clientTtlSeconds);
     return;
   }
-  cacheContext.set(res, { cacheKey, namespace, ttlSeconds });
+  cacheContext.set(res, { cacheKey, namespace, ttlSeconds, clientTtlSeconds });
   await produce();
 }
 
@@ -438,7 +445,9 @@ async function handleApi(req, res, url) {
   if (trackId && method === 'GET') { await serveCached(res, 'track', trackId, 300, () => handleTrack(trackId, res)); return true; }
   if (pathname === '/api/releases') { await serveCached(res, 'releases', url.search, 60, () => handleReleases(url, res)); return true; }
   if (pathname === '/api/charts') { await serveCached(res, 'charts', url.search, 60, () => handleCharts(url, res)); return true; }
-  if (pathname === '/api/community/posts' && method === 'GET') { await serveCached(res, 'posts', url.search, 15, () => handlePosts(url, res)); return true; }
+  // visitor-authored content: cached server-side (bumped on every publish) but
+  // never in the browser, or a poster would not see their own post.
+  if (pathname === '/api/community/posts' && method === 'GET') { await serveCached(res, 'posts', url.search, 15, () => handlePosts(url, res), 0); return true; }
   if (pathname === '/api/community/posts' && method === 'POST') {
     await handleCreatePost(req, res);
     void cache.bump('posts');

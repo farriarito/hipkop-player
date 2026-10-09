@@ -66,8 +66,9 @@ test('api cache: reads are cacheable, repeat reads skip the catalog, and a sync 
   const health = await get(base, '/api/health');
   assert.match(health.headers.get('cache-control'), /max-age=5/, 'probes want a short TTL');
 
+  // Visitor-authored content is cached server-side but never in the browser.
   const posts = await get(base, '/api/community/posts');
-  assert.match(posts.headers.get('cache-control'), /max-age=15/);
+  assert.strictEqual(posts.headers.get('cache-control'), 'no-store');
 
   const sync = await get(base, '/api/sync/jobs');
   assert.strictEqual(sync.headers.get('cache-control'), 'no-store', 'writes and jobs must never be cached');
@@ -97,4 +98,29 @@ test('api cache: each route declares its own TTL, and the search key includes th
   assert.strictEqual(await ttlOf('/api/releases'), 60);
   assert.strictEqual(await ttlOf('/api/search?q=cache-probe'), 30);
   assert.strictEqual(await ttlOf('/api/sources'), 300);
+});
+
+test('api cache: a published post is visible on the very next read', async (t) => {
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  // Warm the feed first: the publish has to invalidate what is already cached.
+  const before = await get(base, '/api/community/posts?topic=all&limit=40');
+  assert.strictEqual(before.status, 200);
+
+  const created = await fetch(base + '/api/community/posts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic: 'review', title: '缓存失效探针', body: '发帖后必须立刻可见。' })
+  });
+  assert.strictEqual(created.status, 200);
+  const { id, status } = await created.json();
+  assert.strictEqual(status, 'published');
+
+  const after = await get(base, '/api/community/posts?topic=all&limit=40');
+  assert.ok(after.body.items.some((item) => item.id === id), 'a poster must see their own post immediately');
 });
