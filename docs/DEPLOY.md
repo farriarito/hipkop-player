@@ -17,6 +17,7 @@
 | A. 一台服务器 + Docker | 自己的域名 + HTTPS，长期稳定 | 服务器费用 + 域名 | 推荐，本文重点 |
 | B. PaaS（Railway / Render / Fly.io） | 平台子域名 + HTTPS | 免费额度或几美元/月 | **必须挂持久卷**，否则每次部署目录清空 |
 | C. 隧道（Cloudflare Tunnel / Tailscale Funnel） | 立刻可用的公网地址 | 免费 | 适合演示；笔记本关机即失效 |
+| D. 用户态部署到只开 sshd 的服务器 | 公网 HTTPS（走**出网**隧道） | 免费 | 没有 sudo / docker 组权限也能上；脚本见 deploy/server/ |
 
 ---
 
@@ -80,6 +81,30 @@ tailscale funnel --bg off      # 关掉
 
 ---
 
+## D. 只开 sshd 端口的服务器（无 sudo / 无 Docker）
+
+如果机器满足：能 SSH、但不是 root、不在 docker 组、防火墙上只有 sshd 端口对公网开放
+（实测 8000/8501/18080 之类从外部一律连不上），那么有两条结论：
+
+1. **不能直接把 HTTP 服务暴露出去**，公网入口只能做成**出网隧道**；
+2. 不用装任何系统级依赖，整个应用在用户态就能跑（Node 二进制 + `dist/`，没有运行时依赖）。
+
+可执行脚本与坑位清单：`deploy/server/README.md`。要点：
+
+```bash
+bash ~/hipkop/bin/start.sh      # 起服务 + 自检 /api/health
+bash ~/hipkop/bin/tunnel.sh     # 打印 https://<随机>.trycloudflare.com
+bash ~/hipkop/bin/watchdog.sh & # 每分钟巡检，app/隧道掉了自动拉起
+```
+
+注意两条硬性限制：
+
+- **Ubuntu 18.04（glibc 2.27）跑不了 Node 22+ 的官方二进制**（要求 glibc 2.28）。
+  要么用 musl 静态包（`unofficial-builds.nodejs.org`），要么换一台 glibc ≥ 2.28 的机器。
+- 这类环境通常**没有 cron / systemd**，`@reboot` 不可用，只能靠 `watchdog.sh` 兜底；
+  pod/容器重建后需要手工再拉一次。
+
+隧道地址每次重启都会变；要固定域名就得换成 Cloudflare 具名隧道（需要账号）或请管理员放行端口。
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
