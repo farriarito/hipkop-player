@@ -893,6 +893,35 @@ const taxonomySummary = () => ({
   byBucket: all(`SELECT COALESCE(genre_bucket, 'unknown') AS bucket, COUNT(*) AS count FROM artists GROUP BY genre_bucket ORDER BY count DESC`)
 });
 
+// Artwork warm-up. A cold deployment has an empty cover cache, so the first
+// visitor pays for every upstream fetch; these two queries let a script pull the
+// display-sized variants ahead of time, most popular first.
+const listCoverTargets = (limit = 0) =>
+  all(
+    `SELECT id, cover_url AS coverUrl FROM albums
+      WHERE COALESCE(TRIM(cover_url), '') <> ''
+      ORDER BY COALESCE(popularity, 0) DESC, release_date DESC, id
+      ${limit > 0 ? 'LIMIT ?' : ''}`,
+    limit > 0 ? [limit] : []
+  );
+
+const listArtistsMissingArt = (limit = 0) =>
+  all(
+    `SELECT id, name, provider, provider_artist_id AS providerId FROM artists
+      WHERE COALESCE(TRIM(avatar_url), '') = '' AND COALESCE(TRIM(hero_url), '') = ''
+      ORDER BY COALESCE(popularity, 0) DESC, name
+      ${limit > 0 ? 'LIMIT ?' : ''}`,
+    limit > 0 ? [limit] : []
+  );
+const listArtistArtTargets = (limit = 0) =>
+  all(
+    `SELECT id, COALESCE(avatar_url, hero_url) AS artUrl FROM artists
+      WHERE COALESCE(TRIM(avatar_url), '') <> '' OR COALESCE(TRIM(hero_url), '') <> ''
+      ORDER BY COALESCE(popularity, 0) DESC, name
+      ${limit > 0 ? 'LIMIT ?' : ''}`,
+    limit > 0 ? [limit] : []
+  );
+
 module.exports = {
   setSource,
   listSources,
@@ -941,6 +970,9 @@ module.exports = {
   countPosts,
   seedPostsIfEmpty,
   getCover,
+  listCoverTargets,
+  listArtistArtTargets,
+  listArtistsMissingArt,
   beginCover,
   completeCover,
   failCover,

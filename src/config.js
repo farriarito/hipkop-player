@@ -104,8 +104,15 @@ module.exports = {
   agentMinConfidence: Number(env.HIPKOP_AGENT_MIN_CONFIDENCE || 0.7),
   agentBatchSize: Number(env.HIPKOP_AGENT_BATCH || 50),
 
+  // Read cache. Empty means the in-process LRU, which is enough for a single
+  // process; a URL switches the same code to Redis (see src/cache.js).
+  redisUrl: env.HIPKOP_REDIS_URL || '',
+
   // Caching
   cacheTtlMs: Number(env.HIPKOP_CACHE_TTL_HOURS || 24) * 3600 * 1000,
   mediaMaxBytes: Number(env.HIPKOP_MEDIA_MAX_BYTES || 8 * 1024 * 1024),
-  mediaRetryAttempts: Number(env.HIPKOP_MEDIA_ATTEMPTS || 3)
+  mediaRetryAttempts: Number(env.HIPKOP_MEDIA_ATTEMPTS || 3),
+  // A cold grid must not hang on one slow artwork host: the first paint keeps
+  // a tighter budget than metadata calls.
+  mediaTimeoutMs: Number(env.HIPKOP_MEDIA_TIMEOUT || 8000)
 };

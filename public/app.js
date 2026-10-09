@@ -131,14 +131,23 @@ async function safeApi(path, fallbackValue) {
   }
 }/* ------------------------------- rendering -------------------------------- */
 
-function cover(item, extra = '') {
-  const url = window.HipkopCulture.resource(item.coverUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/cover/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg');
+// Only /media/... understands ?w=; provider URLs are passed through untouched.
+function sized(url, width) {
+  if (typeof url !== 'string' || !url.startsWith('/media/')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
+}
+
+// Widths track what the layout actually paints. A 300px tile asking for the
+// 900px original was 6-8x the bytes for no visible gain, which is what made the
+// first paint over a slow link feel stuck.
+function cover(item, extra = '', width = 300) {
+  const url = sized(window.HipkopCulture.resource(item.coverUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/cover/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg'), width);
   const alt = item.title || item.name || '专辑封面';
   return `<div class="cover${extra ? ` ${extra}` : ''}"><img src="${esc(url)}" alt="${esc(alt)}" width="300" height="300" loading="lazy" decoding="async" onerror="this.style.display='none';this.closest('.cover')&&this.closest('.cover').classList.add('img-fallback')"><span>${esc(item.genre || item.kind || '')}</span></div>`;
 }
 
 function avatar(item, cls = '') {
-  const url = window.HipkopCulture.resource(item.avatarUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/avatar/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg');
+  const url = sized(window.HipkopCulture.resource(item.avatarUrl, item.id && !/^(undefined|null)$/.test(item.id) ? `/media/avatar/${encodeURIComponent(item.id)}` : '/hipkop-logo.svg'), 100);
   const alt = item.name || item.artist || '艺人头像';
   return `<img ${cls ? `class="${cls}" ` : ''}src="${esc(url)}" alt="${esc(alt)}" width="48" height="48" loading="lazy" decoding="async" onerror="this.style.display='none';var host=this.closest('.avatar-wrap,.artist-info,.artist-result,.avatar');if(host)host.classList.add('img-fallback')">`;
 }
@@ -176,7 +185,7 @@ function trackRow(track, index, options = {}) {
   const label = track.trackNumber != null ? String(track.trackNumber).padStart(2, '0') : index != null ? String(index + 1).padStart(2, '0') : '♪';
   const listen = options.listen === false ? '' : `<button class="track-preview" type="button" onclick="event.stopPropagation();playWork('${esc(track.id)}')" aria-label="播放 ${esc(track.title)} 试听"><span class="play-shape" aria-hidden="true"></span></button>${listenButton(track, '')}`;
   const name = `打开曲目 ${track.title || ''}${track.artist ? ' · ' + track.artist : ''}`;
-  return `<div class="track${options.thumbnail ? ' track-with-art' : ''}" role="button" tabindex="0" aria-label="${esc(name)}" onclick="openItem('${esc(track.id)}')" onkeydown="activateKey(event)">${options.thumbnail ? cover(track, 'track-cover') : `<span aria-hidden="true">${label}</span>`}<b>${esc(track.title)}</b><em>${esc(track.artist || track.albumTitle || '')}</em>${listen}</div>`;
+  return `<div class="track${options.thumbnail ? ' track-with-art' : ''}" role="button" tabindex="0" aria-label="${esc(name)}" onclick="openItem('${esc(track.id)}')" onkeydown="activateKey(event)">${options.thumbnail ? cover(track, 'track-cover', 100) : `<span aria-hidden="true">${label}</span>`}<b>${esc(track.title)}</b><em>${esc(track.artist || track.albumTitle || '')}</em>${listen}</div>`;
 }
 
 function artistResult(artist) {
@@ -589,7 +598,7 @@ function renderAlbum(data) {
     .map((a) => `<a role="button" tabindex="0" aria-label="查看艺人 ${esc(a.name)}" onclick="artistDetail('${esc(a.id)}')" onkeydown="activateKey(event)">${esc(a.name)}</a>`)
     .join(' · ');
   $('#view').innerHTML = `<div class="detail">${backButton()}
-    <div class="detail-hero"><div class="detail-cover">${cover(album)}</div><div>
+    <div class="detail-hero"><div class="detail-cover">${cover(album, '', 600)}</div><div>
       <span class="eyebrow">${album.kind === 'single' ? 'SINGLE' : 'ALBUM'} · ${esc(yearOf(album) || '')}${tags ? ' · ' + esc(tags) : ''}</span>
       <h1>${esc(album.title)}</h1>${artistLink}
       <div class="detail-meta"><span>发行日期 <b>${esc(album.releaseDate || '待同步')}</b></span><span>曲目 <b>${tracks.length || album.trackCount || 0}</b></span><span>评分 <b>${album.score != null ? Number(album.score).toFixed(1) : '—'}</b></span></div>
@@ -611,7 +620,7 @@ function renderTrack(data) {
   const liked = state.liked.has(track.id);
   const tags = tagLine(track).join(' · ');
   $('#view').innerHTML = `<div class="detail">${backButton()}
-    <div class="detail-hero"><div class="detail-cover">${cover(album || track)}</div><div>
+    <div class="detail-hero"><div class="detail-cover">${cover(album || track, '', 600)}</div><div>
       <span class="eyebrow">SINGLE · ${esc(yearOf(track) || '')}${tags ? ' · ' + esc(tags) : ''}</span>
       <h1>${esc(track.title)}</h1>
       ${artists && artists.length ? `<div class="artist" role="button" tabindex="0" aria-label="查看艺人 ${esc(track.artist)}" onclick="artistDetail('${esc(artists[0].id)}')" onkeydown="activateKey(event)">${esc(track.artist)}</div>` : `<div class="artist">${esc(track.artist)}</div>`}

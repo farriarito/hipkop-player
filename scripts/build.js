@@ -18,6 +18,13 @@ for (const name of ['public', 'src']) {
   fs.cpSync(path.join(root, name), output, { recursive: true });
 }
 fs.copyFileSync(path.join(root, 'server.js'), path.join(destination, 'server.js'));
+// Ops scripts a deployment may run against its own catalog. The verify-* and
+// asset-pipeline scripts stay out: they belong to development, not the image.
+const opsScripts = ['warm-media.js', 'backfill-artist-art.js', 'sync-once.js', 'taxonomy-agent.js'];
+fs.mkdirSync(path.join(destination, 'scripts'), { recursive: true });
+for (const name of opsScripts) {
+  fs.copyFileSync(path.join(root, 'scripts', name), path.join(destination, 'scripts', name));
+}
 fs.copyFileSync(path.join(root, '.env.example'), path.join(destination, '.env.example'));
 const sourcePackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 fs.writeFileSync(path.join(destination, 'package.json'), JSON.stringify({

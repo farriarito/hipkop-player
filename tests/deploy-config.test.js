@@ -58,3 +58,34 @@ test('deploy: the container contract points the catalog at the volume', () => {
   assert.match(compose, /service_healthy/i);
   assert.doesNotMatch(compose, /"8080:8080"/, 'only the HTTPS ingress should expose ports');
 });
+
+test('deploy: compose wires the app to a capped, non-persistent Redis cache', () => {
+  const fs = require('node:fs');
+  const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
+  assert.match(compose, /HIPKOP_REDIS_URL: redis:\/\/redis:6379/, 'the app must be pointed at the cache service');
+  assert.match(compose, /--maxmemory", "256mb"/, 'the cache must be capped');
+  assert.match(compose, /--maxmemory-policy", "allkeys-lru"/, 'and must evict instead of growing without bound');
+  assert.match(compose, /--appendonly", "no"/, 'cache data is disposable: no AOF');
+  assert.match(compose, /redis-cli", "ping"/, 'a cache that is up but wedged must be visible');
+});
+
+test('deploy: a Redis outage cannot block the app, only slow it down', () => {
+  const fs = require('node:fs');
+  const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
+  const app = compose.slice(compose.indexOf('app:'), compose.indexOf('redis:'));
+  assert.doesNotMatch(app, /depends_on/, 'the app must start, and keep serving, without the cache');
+});
+
+test('deploy: the bundle ships the ops scripts a server needs, not the dev ones', () => {
+  const fs = require('node:fs');
+  const build = fs.readFileSync(path.join(root, 'scripts/build.js'), 'utf8');
+  assert.match(build, /'warm-media\.js'/, 'a fresh host must be able to pre-fetch artwork');
+  assert.match(build, /'sync-once\.js'/, 'and to force a sync without waiting for the scheduler');
+  assert.doesNotMatch(build, /verify-exhibition/, 'the Playwright checks belong to development');
+});
+
+test('deploy: the redis URL is opt-in, so a laptop run stays on the in-process cache', () => {
+  const fs = require('node:fs');
+  const example = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
+  assert.match(example, /#HIPKOP_REDIS_URL=/, 'the sample env documents the knob without enabling it');
+});

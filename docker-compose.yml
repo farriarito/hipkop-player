@@ -10,6 +10,10 @@ services:
       HIPKOP_PUBLIC_ORIGIN: https://${HIPKOP_DOMAIN:?Set your domain}
       HIPKOP_TRUST_PROXY: "true"
       HIPKOP_SCHEDULER: "true"
+      # Shared read cache. Deliberately not a hard dependency: if Redis is down
+      # the app falls back to its in-process LRU, so pages get slower instead of
+      # failing. That is also why the app never waits for the cache at startup.
+      HIPKOP_REDIS_URL: redis://redis:6379
     volumes:
       - hipkop-data:/data
     expose: ["8080"]
@@ -21,6 +25,24 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Pure cache: every entry carries a TTL, so nothing here is worth persisting.
+    # The LRU cap is what keeps a misbehaving client from filling the box.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    expose: ["6379"]
+    mem_limit: 320m
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
   gateway:
     image: caddy:2-alpine
     restart: unless-stopped

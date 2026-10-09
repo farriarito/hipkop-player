@@ -8,6 +8,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
+const crypto = require('crypto');
 
 const config = require('./src/config');
 const repo = require('./src/repo');
@@ -37,7 +39,35 @@ const MIME = {
 
 const PUBLIC = path.resolve(config.publicDir);
 
-function serveStatic(req, res, pathname) {
+// Compressed, hash-tagged asset delivery. Bundled JS/CSS is the difference
+// between a first paint that waits on the network and one that does not: gzip
+// takes the front-end payload from ~250 KB to ~70 KB, and an ETag turns every
+// later visit into a 304 instead of a re-download.
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|xml)|image\/svg)/;
+const IMMUTABLE_PATH = /^\/(vendor\/|assets\/fonts\/)/;
+const assetCache = new Map();
+
+function assetFor(filePath, ext) {
+  const stat = fs.statSync(filePath);
+  const hit = assetCache.get(filePath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
+  const raw = fs.readFileSync(filePath);
+  const type = MIME[ext] || 'application/octet-stream';
+  const entry = {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    type,
+    etag: `W/"${crypto.createHash('sha1').update(raw).digest('hex').slice(0, 20)}"`,
+    raw,
+    gzip: null
+  };
+  if (COMPRESSIBLE.test(type)) entry.gzip = zlib.gzipSync(raw, { level: 6 });
+  if (assetCache.size > 256) assetCache.clear();
+  assetCache.set(filePath, entry);
+  return entry;
+}
+
+function serveStatic(req, res, pathname, search) {
   const relative = ['/', '', '/hipkop', '/hipkop/'].includes(pathname) ? 'index.html' : `.${pathname}`;
   const filePath = path.resolve(PUBLIC, relative);
   if (!filePath.startsWith(`${PUBLIC}${path.sep}`) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
@@ -46,11 +76,41 @@ function serveStatic(req, res, pathname) {
     return;
   }
   const ext = path.extname(filePath).toLowerCase();
-  res.writeHead(200, {
-    'Content-Type': MIME[ext] || 'application/octet-stream',
-    'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=300'
-  });
-  fs.createReadStream(filePath).on('error', () => res.destroy()).pipe(res);
+
+  const asset = assetFor(filePath, ext);
+  const versioned = new URLSearchParams(search || '').has('v');
+  const headers = {
+    'Content-Type': asset.type,
+    ETag: asset.etag,
+    // Set on every response, not just the compressed one: a shared cache must
+    // know the body depends on Accept-Encoding both ways round.
+    Vary: 'Accept-Encoding',
+    'Cache-Control':
+      ext === '.html'
+        ? 'no-store'
+        : versioned || IMMUTABLE_PATH.test(pathname)
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=600, must-revalidate'
+  };
+
+  if (req.headers['if-none-match'] === asset.etag) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+
+  if (asset.gzip && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    res.writeHead(200, {
+      ...headers,
+      'Content-Encoding': 'gzip',
+      'Content-Length': asset.gzip.length
+    });
+    res.end(asset.gzip);
+    return;
+  }
+
+  res.writeHead(200, { ...headers, 'Content-Length': asset.raw.length });
+  res.end(asset.raw);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -78,7 +138,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method !== 'GET') { security.reject(res, 405, 'method_not_allowed'); return; }
-    serveStatic(req, res, decodeURIComponent(pathname));
+    serveStatic(req, res, decodeURIComponent(pathname), url.search);
   } catch (error) {
     log.error(`${req.method} ${pathname} failed:`, error.message);
     if (!res.headersSent) {

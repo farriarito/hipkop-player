@@ -29,6 +29,7 @@ const config = require('./config');
 const security = require('./security');
 const auth = require('./auth');
 const database = require('./db');
+const cache = require('./cache');
 const { buildListenLinks } = require('./listen');
 const { calibrate } = require('./calibrate');
 const log = require('./util/logger')('api');
@@ -115,13 +116,41 @@ const serializeTrack = (track, extra = {}) => {
 // Response helpers
 // ---------------------------------------------------------------------------
 
-const json = (res, data, status = 200) => {
+// Responses go through one place so the read cache and the HTTP cache agree.
+// A handler reached through serveCached leaves its context on `res`, which is
+// how the payload gets stored without threading a request object everywhere.
+const cacheContext = new WeakMap();
+
+const json = (res, data, status = 200, ttlSeconds = 0) => {
+  const context = cacheContext.get(res);
+  const ttl = ttlSeconds || (context ? context.ttlSeconds : 0);
+  if (context && status === 200 && ttl > 0 && data && !data.error) {
+    void cache.set(context.cacheKey, data, ttl * 1000);
+  }
+  // Only a successful read is publicly cacheable; a 404 or an error must not be
+  // pinned in a shared cache.
+  const fresh = status === 200 && ttl > 0;
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
+    'Cache-Control': fresh
+      ? `public, max-age=${ttl}, stale-while-revalidate=${ttl * 2}`
+      : 'no-store'
   });
   res.end(JSON.stringify(data));
 };
+
+// Read-through wrapper for the expensive GETs: the browser gets its own
+// max-age, and the process-level cache keeps repeat loads off SQLite.
+async function serveCached(res, namespace, key, ttlSeconds, produce) {
+  const cacheKey = await cache.keyFor(namespace, key);
+  const hit = await cache.get(cacheKey);
+  if (hit !== undefined) {
+    json(res, hit, 200, ttlSeconds);
+    return;
+  }
+  cacheContext.set(res, { cacheKey, namespace, ttlSeconds });
+  await produce();
+}
 
 const fail = (res, status, code, message) => json(res, { error: code, message: message || code }, status);
 
@@ -374,6 +403,7 @@ async function handleApi(req, res, url) {
       if (!['published', 'rejected'].includes(body.status)) { fail(res, 400, 'invalid_status'); return true; }
       const result = database.run("UPDATE community_posts SET status = ?, updated_at = ? WHERE id = ? AND status = 'pending'", [body.status, database.nowIso(), Number(review[1])]);
       if (!result.changes) { fail(res, 404, 'pending_post_not_found'); return true; }
+      void cache.bump('posts');
       json(res, { ok: true }); return true;
     }
     if (method !== 'POST' && pathname !== '/api/sync/jobs') {
@@ -386,27 +416,40 @@ async function handleApi(req, res, url) {
     if (!security.sameOrigin(req, res) || !security.rateLimit(req, res, 'post', 5, 10 * 60000)) return true;
   }
   if (pathname === '/api/search' && !security.rateLimit(req, res, 'search', 30)) return true;
-  if (pathname === '/api/health') { handleHealth(res); return true; }
+
+  // TTLs: the catalog changes on sync, not on refresh, so a read can sit in the
+  // cache; anything a visitor writes bumps its namespace below.
+  if (pathname === '/api/health') { await serveCached(res, 'health', 'summary', 5, () => handleHealth(res)); return true; }
   if (pathname === '/api/providers') {
-    json(res, { providers: providers.describeProviders().map(p => config.production ? { name: p.name, label: p.label, available: p.available } : p), available: providers.availableProviders() });
+    json(res, { providers: providers.describeProviders().map(p => config.production ? { name: p.name, label: p.label, available: p.available } : p), available: providers.availableProviders() }, 200, 60);
     return true;
   }
-  if (pathname === '/api/sources') { json(res, { sources: repo.listSources() }); return true; }
-  if (pathname === '/api/categories') { handleCategories(res); return true; }
+  if (pathname === '/api/sources') { json(res, { sources: repo.listSources() }, 200, 300); return true; }
+  if (pathname === '/api/categories') { await serveCached(res, 'categories', 'all', 300, () => handleCategories(res)); return true; }
 
   const artistId = matchId(pathname, '/api/artists/');
   const albumId = matchId(pathname, '/api/albums/');
   const trackId = matchId(pathname, '/api/tracks/');
 
-  if (pathname === '/api/search') { await handleSearch(url, res); return true; }
-  if (pathname === '/api/albums' && method === 'GET') { handleBrowse(url, res); return true; }
-  if (artistId && method === 'GET') { await handleArtist(artistId, res); return true; }
-  if (albumId && method === 'GET') { await handleAlbum(albumId, res); return true; }
-  if (trackId && method === 'GET') { await handleTrack(trackId, res); return true; }
-  if (pathname === '/api/releases') { handleReleases(url, res); return true; }
-  if (pathname === '/api/charts') { handleCharts(url, res); return true; }
-  if (pathname === '/api/community/posts' && method === 'GET') { handlePosts(url, res); return true; }
-  if (pathname === '/api/community/posts' && method === 'POST') { await handleCreatePost(req, res); return true; }
+  if (pathname === '/api/search') { await serveCached(res, 'search', url.search, 30, () => handleSearch(url, res)); return true; }
+  if (pathname === '/api/albums' && method === 'GET') { await serveCached(res, 'albums', url.search, 60, () => handleBrowse(url, res)); return true; }
+  if (artistId && method === 'GET') { await serveCached(res, 'artist', artistId, 300, () => handleArtist(artistId, res)); return true; }
+  if (albumId && method === 'GET') { await serveCached(res, 'album', albumId, 300, () => handleAlbum(albumId, res)); return true; }
+  if (trackId && method === 'GET') { await serveCached(res, 'track', trackId, 300, () => handleTrack(trackId, res)); return true; }
+  if (pathname === '/api/releases') { await serveCached(res, 'releases', url.search, 60, () => handleReleases(url, res)); return true; }
+  if (pathname === '/api/charts') { await serveCached(res, 'charts', url.search, 60, () => handleCharts(url, res)); return true; }
+  if (pathname === '/api/community/posts' && method === 'GET') { await serveCached(res, 'posts', url.search, 15, () => handlePosts(url, res)); return true; }
+  if (pathname === '/api/community/posts' && method === 'POST') {
+    await handleCreatePost(req, res);
+    void cache.bump('posts');
+    return true;
+  }
+  // A sync rewrites the catalog under the cache's feet. The admin gate above has
+  // already run, so dropping the read cache here is safe and cannot be triggered
+  // by an anonymous visitor.
+  if (method === 'POST' && pathname.startsWith('/api/sync/')) {
+    void cache.bumpMany(['charts', 'releases', 'albums', 'artist', 'album', 'track', 'categories', 'search', 'health']);
+  }
   if (pathname === '/api/sync/jobs') {
     json(res, { jobs: repo.listJobs(clampInt(url.searchParams.get('limit'), 50, 1, 200)) });
     return true;

@@ -249,8 +249,50 @@ async function syncArtistProfile(artistId) {
     for (const track of tracks) repo.upsertTrack(track);
   }
 
+  const art = await fillArtistArt(artistId);
+
   drainWarmQueue();
-  return { artistId, refreshed };
+  return { artistId, refreshed, art };
+}
+
+// Case- and punctuation-insensitive: "A$AP Rocky" must still match "A$AP Rocky",
+// but "$NOT" must not match "$NOT & A$AP Rocky".
+const artKey = (value) => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+// Apple publishes an artist row with no portrait at all, so a chart-synced artist
+// would show its most popular album cover as its face forever. Last.fm is the
+// provider built for this (portraits + biographies); it is key-gated, so without
+// LASTFM_API_KEY this is a no-op instead of a slow timeout.
+async function fillArtistArt(artistId) {
+  const row = repo.getArtistRow(artistId);
+  if (!row) return { filled: false, reason: 'artist_not_found' };
+  if (row.avatarUrl || row.heroUrl) return { filled: false, reason: 'already_has_art' };
+
+  const lastfm = providers.get('lastfm');
+  if (!lastfm || typeof lastfm.getArtistInfo !== 'function' || !providers.isAvailable(lastfm)) {
+    return { filled: false, reason: 'art_source_unavailable' };
+  }
+
+  let artist = null;
+  try {
+    artist = await lastfm.getArtistInfo(row.name);
+  } catch (error) {
+    providers.recordFailure('lastfm', error);
+    log.warn(`artist art lookup failed for ${row.name}: ${error.message}`);
+    return { filled: false, reason: 'lookup_failed' };
+  }
+  providers.recordSuccess('lastfm');
+
+  // getArtistInfo answers with its closest match, so never pin a different
+  // artist's portrait onto this row.
+  if (!artist || !artist.avatarUrl || artKey(artist.name) !== artKey(row.name)) {
+    return { filled: false, reason: 'no_confident_match' };
+  }
+
+  repo.persistArtist({ ...artist, id: row.id, name: row.name, provider: row.provider, providerId: row.providerId });
+  precache(artist.avatarUrl);
+  precache(artist.heroUrl);
+  return { filled: true, avatarUrl: artist.avatarUrl, bio: artist.bio || null };
 }
 
 // An Apple collection id only exists in the storefront that published it, and a
@@ -462,6 +504,7 @@ module.exports = {
   mergeChartFeeds,
   syncReleases,
   syncArtistProfile,
+  fillArtistArt,
   syncAlbum,
   syncSearch,
   refreshStaleArtists,

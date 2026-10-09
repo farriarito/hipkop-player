@@ -68,7 +68,7 @@
   function post(post, topicName, featured = false) {
     const time = timestamp(post.createdAt);
     const related = post.albumId && post.albumTitle ? `<div class="post-music">
-      <button class="post-music-detail" type="button" onclick="openItem(${argument(post.albumId)})" aria-label="打开关联作品 ${escape(post.albumTitle)}"><img src="/media/cover/${encodeURIComponent(post.albumId)}" alt="${escape(post.albumTitle)}封面" loading="lazy" width="48" height="48" onerror="this.src='/hipkop-logo.svg';this.onerror=null"><span><small>帖子关联作品</small><b>${escape(post.albumTitle)}</b><em>${escape(post.albumArtist || '')}</em></span></button>
+      <button class="post-music-detail" type="button" onclick="openItem(${argument(post.albumId)})" aria-label="打开关联作品 ${escape(post.albumTitle)}"><img src="/media/cover/${encodeURIComponent(post.albumId)}?w=100" alt="${escape(post.albumTitle)}封面" loading="lazy" width="48" height="48" onerror="this.src='/hipkop-logo.svg';this.onerror=null"><span><small>帖子关联作品</small><b>${escape(post.albumTitle)}</b><em>${escape(post.albumArtist || '')}</em></span></button>
       <button type="button" class="track-preview" onclick="playWork(${argument(post.albumId)})" aria-label="试听关联作品 ${escape(post.albumTitle)}"><span class="play-shape" aria-hidden="true"></span></button></div>` : '';
     return `<article class="post wall-post${featured ? ' wall-featured' : ''}" data-post-id="${escape(post.id)}">
       ${featured ? '<div class="wall-feature-label">编辑来信 <span aria-hidden="true">↗</span></div>' : ''}

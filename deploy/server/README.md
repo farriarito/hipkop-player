@@ -46,6 +46,20 @@ bash ~/hipkop/bin/tunnel.sh     # 打印 https://<随机>.trycloudflare.com
 bash ~/hipkop/bin/watchdog.sh & # 每分钟巡检，app 或隧道掉了自动拉起
 ```
 
+## 封面预热与缓存
+
+新机器上封面缓存是空的，第一批访客会为每张图付一次回源。装完之后预热一轮：
+
+```bash
+cd ~/hipkop/app
+setsid nohup node --env-file-if-exists=.env scripts/warm-media.js > ~/hipkop/log/warm.log 2>&1 &
+tail -f ~/hipkop/log/warm.log        # 1388 专辑 × 300/600/100 三档，约 4 分钟
+```
+
+这台上**没有 Redis**，所以 `/api/*` 走进程内 LRU（默认，`HIPKOP_REDIS_URL` 留空即可）；
+只要还只有这一个进程，这样就是对的。哪天上多副本，再给 `HIPKOP_REDIS_URL` 指一个
+Redis，缓存会自动切过去（连不上会退回进程内 LRU，不会 500）。
+
 ## 升级
 
 ```bash
