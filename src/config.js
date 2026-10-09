@@ -7,6 +7,11 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const env = process.env;
+const production = env.NODE_ENV === 'production';
+const adminToken = env.HIPKOP_ADMIN_TOKEN || '';
+if (production && adminToken.length < 32) {
+  throw new Error('Production requires HIPKOP_ADMIN_TOKEN (at least 32 characters)');
+}
 
 const bool = (value, fallback) => {
   if (value === undefined || value === null || value === '') return fallback;
@@ -33,8 +38,14 @@ const agentModel =
 
 module.exports = {
   root,
-  port: Number(env.HIPKOP_PLAYER_PORT || 4180),
-  host: env.HIPKOP_PLAYER_HOST || '127.0.0.1',
+  production,
+  adminToken,
+  publicOrigin: env.HIPKOP_PUBLIC_ORIGIN || '',
+  trustProxy: bool(env.HIPKOP_TRUST_PROXY, false),
+  requireAccount: production || bool(env.HIPKOP_REQUIRE_ACCOUNT, false),
+  moderatePosts: production || bool(env.HIPKOP_MODERATE_POSTS, false),
+  port: Number(env.HIPKOP_PLAYER_PORT || env.PORT || 4180),
+  host: env.HIPKOP_PLAYER_HOST || (production ? '0.0.0.0' : '127.0.0.1'),
   publicDir: path.join(root, 'public'),
   dbPath: env.HIPKOP_DB_PATH || path.join(root, 'data', 'hipkop.sqlite'),
   dbUrl: env.HIPKOP_DB_URL || '',

@@ -1,0 +1,12 @@
+.git
+.env*
+!.env.example
+data
+node_modules
+dist
+tmp
+docs/*-verification
+out_wx0870e45bb54e96f1
+Soundive_reverse_report.md
+*.log
+.typecheck-errors.txt

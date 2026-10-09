@@ -26,6 +26,9 @@ const providers = require('./providers');
 const search = require('./search');
 const sync = require('./sync');
 const config = require('./config');
+const security = require('./security');
+const auth = require('./auth');
+const database = require('./db');
 const { buildListenLinks } = require('./listen');
 const { calibrate } = require('./calibrate');
 const log = require('./util/logger')('api');
@@ -122,19 +125,7 @@ const json = (res, data, status = 200) => {
 
 const fail = (res, status, code, message) => json(res, { error: code, message: message || code }, status);
 
-const readBody = (req) =>
-  new Promise((resolve) => {
-    let raw = '';
-    req.on('data', (chunk) => {
-      raw += chunk;
-      if (raw.length > 1_000_000) req.destroy();
-    });
-    req.on('end', () => {
-      if (!raw) return resolve({});
-      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
-    });
-    req.on('error', () => resolve({}));
-  });
+const readBody = security.readJson;
 
 const clampInt = (value, fallback, min, max) => {
   const number = Number.parseInt(value, 10);
@@ -163,6 +154,7 @@ const TOPIC_KEYS = new Set(COMMUNITY_TOPICS.map((topic) => topic.key));
 
 async function handleSearch(url, res) {
   const query = (url.searchParams.get('q') || '').trim();
+  if (query.length > 160) return fail(res, 400, 'query_too_long');
   const type = url.searchParams.get('type') || 'all';
   const page = clampInt(url.searchParams.get('page'), 1, 1, 50);
   const pageSize = clampInt(url.searchParams.get('pageSize'), 20, 1, 50);
@@ -312,20 +304,27 @@ const handlePosts = (url, res) => {
 };
 
 async function handleCreatePost(req, res) {
+  const user = config.requireAccount ? auth.requireUser(req, res) : auth.current(req);
+  if (config.requireAccount && !user) return;
   const body = await readBody(req);
   const topic = TOPIC_KEYS.has(String(body.topic)) && body.topic !== 'all' ? String(body.topic) : 'general';
   const title = text(body.title, 120);
   const content = text(body.body, 2000);
   if (!title || !content) return fail(res, 400, 'invalid_post', 'title and body are required');
+  if (body.albumId && (typeof body.albumId !== 'string' || !repo.getAlbumRow(body.albumId))) return fail(res, 400, 'invalid_album');
+  if (body.artistId && (typeof body.artistId !== 'string' || !repo.getArtistRow(body.artistId))) return fail(res, 400, 'invalid_artist');
+  const status = config.moderatePosts ? 'pending' : 'published';
   const id = repo.createPost({
     topic,
     title,
     body: content,
-    author: text(body.author, 60) || 'HIPKOP 听众',
+    author: user ? user.displayName : text(body.author, 60) || 'HIPKOP 听众',
     albumId: body.albumId || null,
-    artistId: body.artistId || null
+    artistId: body.artistId || null,
+    userId: user?.id || null,
+    status
   });
-  json(res, { ok: true, id, post: repo.listPosts({ limit: 1 })[0] || null });
+  json(res, { ok: true, id, status, post: status === 'published' ? repo.listPosts({ limit: 100 }).find(p => p.id === id) || null : null }, status === 'pending' ? 202 : 200);
 }
 
 const handleCalibrate = (res) => {
@@ -333,16 +332,16 @@ const handleCalibrate = (res) => {
   json(res, { ok: true, report });
 };
 
-const handleHealth = (res) =>
+const handleHealth = (res, admin = false) =>
   json(res, {
     ok: true,
     version: require('../package.json').version,
     now: new Date().toISOString(),
-    storage: { driver: 'node:sqlite', path: config.dbPath },
-    stats: repo.stats(),
-    consistency: repo.consistencyReport(),
+    storage: { driver: 'node:sqlite', ...(!config.production || admin ? { path: config.dbPath } : {}) },
+    stats: config.production && !admin ? (({ artists, albums, tracks, posts }) => ({ artists, albums, tracks, posts }))(repo.stats()) : repo.stats(),
+    ...(!config.production || admin ? { consistency: repo.consistencyReport() } : {}),
     categories: repo.categoryCounts(),
-    providers: providers.describeProviders()
+    providers: providers.describeProviders().map(p => config.production && !admin ? { name: p.name, label: p.label, available: p.available } : p)
   });
 
 // ---------------------------------------------------------------------------
@@ -360,9 +359,36 @@ async function handleApi(req, res, url) {
   const pathname = decodeURIComponent(url.pathname);
   const method = req.method || 'GET';
 
+  if (await auth.handle(req, res, url, json)) return true;
+  if (pathname.startsWith('/api/admin/') || pathname.startsWith('/api/sync/')) {
+    if (!security.isAdmin(req)) { fail(res, 401, 'admin_required'); return true; }
+    if (!security.sameOrigin(req, res) || !security.rateLimit(req, res, 'admin', 10)) return true;
+    if (pathname === '/api/admin/health' && method === 'GET') { handleHealth(res, true); return true; }
+    if (pathname === '/api/admin/posts' && method === 'GET') {
+      json(res, { items: database.all("SELECT id, topic, title, body, author, status, created_at AS createdAt FROM community_posts WHERE status = 'pending' ORDER BY id DESC LIMIT 100") });
+      return true;
+    }
+    const review = /^\/api\/admin\/posts\/(\d+)$/.exec(pathname);
+    if (review && method === 'POST') {
+      const body = await readBody(req);
+      if (!['published', 'rejected'].includes(body.status)) { fail(res, 400, 'invalid_status'); return true; }
+      const result = database.run("UPDATE community_posts SET status = ?, updated_at = ? WHERE id = ? AND status = 'pending'", [body.status, database.nowIso(), Number(review[1])]);
+      if (!result.changes) { fail(res, 404, 'pending_post_not_found'); return true; }
+      json(res, { ok: true }); return true;
+    }
+    if (method !== 'POST' && pathname !== '/api/sync/jobs') {
+      fail(res, 405, 'method_not_allowed'); return true;
+    }
+  } else if (method !== 'GET' && !(method === 'POST' && pathname === '/api/community/posts')) {
+    fail(res, 405, 'method_not_allowed'); return true;
+  }
+  if (pathname === '/api/community/posts' && method === 'POST') {
+    if (!security.sameOrigin(req, res) || !security.rateLimit(req, res, 'post', 5, 10 * 60000)) return true;
+  }
+  if (pathname === '/api/search' && !security.rateLimit(req, res, 'search', 30)) return true;
   if (pathname === '/api/health') { handleHealth(res); return true; }
   if (pathname === '/api/providers') {
-    json(res, { providers: providers.describeProviders(), available: providers.availableProviders() });
+    json(res, { providers: providers.describeProviders().map(p => config.production ? { name: p.name, label: p.label, available: p.available } : p), available: providers.availableProviders() });
     return true;
   }
   if (pathname === '/api/sources') { json(res, { sources: repo.listSources() }); return true; }
@@ -386,7 +412,7 @@ async function handleApi(req, res, url) {
     return true;
   }
 
-  if (method === 'POST' || method === 'GET') {
+  if (method === 'POST') {
     if (pathname === '/api/sync/search') {
       const body = method === 'POST' ? await readBody(req) : {};
       const query = (body.q || url.searchParams.get('q') || '').trim();

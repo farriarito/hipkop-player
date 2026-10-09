@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: hipkop
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/server.js
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    disk:
+      name: hipkop-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      - key: NODE_ENV
+        value: production
+      - key: HIPKOP_ADMIN_TOKEN
+        generateValue: true
+      - key: HIPKOP_DB_PATH
+        value: /var/data/hipkop.sqlite
+      - key: HIPKOP_MEDIA_DIR
+        value: /var/data/media
+      - key: HIPKOP_TRUST_PROXY
+        value: "true"
+      - key: HIPKOP_PUBLIC_ORIGIN
+        sync: false
+      - key: HIPKOP_SCHEDULER
+        value: "true"

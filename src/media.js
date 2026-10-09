@@ -17,8 +17,9 @@ const path = require('path');
 
 const config = require('./config');
 const repo = require('./repo');
-const { fetchBuffer } = require('./util/http');
+const { fetchArtwork } = require('./util/artwork');
 const log = require('./util/logger')('media');
+const pending = new Map();
 
 const EXT_BY_TYPE = {
   'image/jpeg': 'jpg',
@@ -72,12 +73,17 @@ const CONTENT_BY_EXT = {
  * Ensure a remote image exists in the local cache.
  * Returns { status, filePath, contentType } — status is 'ready' or 'failed'.
  */
-async function ensureCached(sourceUrl) {
+async function cacheArtwork(sourceUrl) {
   if (!sourceUrl) return { status: 'missing', filePath: null, contentType: null };
 
   const cached = repo.getCover(sourceUrl);
-  if (cached && cached.status === 'ready' && cached.localPath && fs.existsSync(cached.localPath)) {
-    return { status: 'ready', filePath: cached.localPath, contentType: cached.contentType };
+  const portableName = cached?.localPath?.split(/[\\/]/).pop();
+  const cachedPath = portableName && /^[a-f0-9]{40}\.(jpg|jpeg|png|webp|gif|avif)$/.test(portableName) ? path.join(config.mediaDir, portableName) : null;
+  if (cached && cached.status === 'ready' && cachedPath && fs.existsSync(cachedPath)) {
+    return { status: 'ready', filePath: cachedPath, contentType: cached.contentType };
+  }
+  if (cached && cached.status === 'failed' && Date.now() - Date.parse(cached.updatedAt) < 5 * 60000) {
+    return { status: 'failed', filePath: null, contentType: null };
   }
 
   let parsed;
@@ -86,27 +92,34 @@ async function ensureCached(sourceUrl) {
   } catch {
     return { status: 'failed', filePath: null, contentType: null };
   }
-  if (!hostAllowed(parsed.hostname)) {
+  if (parsed.protocol !== 'https:' || !hostAllowed(parsed.hostname)) {
     log.warn(`refusing to cache non-allowlisted host: ${parsed.hostname}`);
     return { status: 'failed', filePath: null, contentType: null };
   }
 
   repo.beginCover(sourceUrl);
   try {
-    const { buffer, contentType } = await fetchBuffer(sourceUrl, {
-      attempts: config.mediaRetryAttempts,
+    const { buffer, contentType } = await fetchArtwork(sourceUrl, {
+      hostAllowed,
+      maxBytes: config.mediaMaxBytes,
       timeout: config.httpTimeoutMs
     });
     if (buffer.length > config.mediaMaxBytes) throw new Error('image_too_large');
     const filePath = localFilePath(sourceUrl, contentType);
     fs.writeFileSync(filePath, buffer);
-    repo.completeCover(sourceUrl, { localPath: filePath, contentType, bytes: buffer.length });
+    repo.completeCover(sourceUrl, { localPath: path.basename(filePath), contentType, bytes: buffer.length });
     return { status: 'ready', filePath, contentType };
   } catch (error) {
     repo.failCover(sourceUrl, error.message);
     log.warn(`cover cache failed for ${sourceUrl}: ${error.message}`);
     return { status: 'failed', filePath: null, contentType: null };
   }
+}
+function ensureCached(sourceUrl) {
+  if (pending.has(sourceUrl)) return pending.get(sourceUrl);
+  if (pending.size >= 8) return Promise.resolve({ status: 'busy', filePath: null });
+  const job = cacheArtwork(sourceUrl).finally(() => pending.delete(sourceUrl));
+  pending.set(sourceUrl, job); return job;
 }
 
 const placeholderSvg = (label, tone = '#2b2b3a') => {
@@ -180,14 +193,15 @@ async function handleMedia(req, res, url) {
       res.end('bad url');
       return true;
     }
-    if (!hostAllowed(parsed.hostname)) {
+    if (parsed.protocol !== 'https:' || !hostAllowed(parsed.hostname)) {
       res.writeHead(403);
       res.end('host not allowed');
       return true;
     }
     try {
-      const { buffer, contentType } = await fetchBuffer(target, { attempts: config.mediaRetryAttempts });
-      sendBuffer(res, buffer, contentType);
+      const cached = await ensureCached(target);
+      if (cached.status !== 'ready') { sendPlaceholder(res, 'H'); return true; }
+      sendBuffer(res, fs.readFileSync(cached.filePath), cached.contentType);
       return true;
     } catch (error) {
       log.warn(`proxy failed: ${error.message}`);

@@ -2,12 +2,15 @@
 .env.local
 !.env.example
 data/
+backups/
+deploy/*.env
 node_modules/
 *.log
 tmp/
 docs/ui-verification/
 docs/exhibition-verification/
 docs/culture-verification/
+docs/public-launch-verification/
 docs/before-current.png
 .typecheck-errors.txt
 dist/

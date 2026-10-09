@@ -24,6 +24,14 @@ interface HipkopPlaybackState {
   externalUrl: string | null;
 }
 interface Window {
+  HipkopAccount: {
+    ensure(): Promise<boolean>;
+    refresh(): Promise<any>;
+    form(register?: boolean): void;
+    logout(): Promise<void>;
+    headers(): Record<string, string>;
+    user(): { displayName: string } | null;
+  };
   HipkopCulture: {
     resource(value: unknown, fallback?: string): string;
     timestamp(value: string): string;

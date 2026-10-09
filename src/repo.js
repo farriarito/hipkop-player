@@ -678,7 +678,7 @@ const stats = () => ({
   albums: get(`SELECT COUNT(*) AS c FROM albums`).c,
   tracks: get(`SELECT COUNT(*) AS c FROM tracks`).c,
   sources: get(`SELECT COUNT(*) AS c FROM metadata_sources`).c,
-  posts: get(`SELECT COUNT(*) AS c FROM community_posts`).c,
+  posts: get(`SELECT COUNT(*) AS c FROM community_posts WHERE status = 'published'`).c,
   pendingJobs: get(`SELECT COUNT(*) AS c FROM sync_jobs WHERE status IN ('pending','running')`).c,
   cachedCovers: get(`SELECT COUNT(*) AS c FROM cover_cache WHERE status = 'ready'`).c
 });
@@ -696,19 +696,19 @@ const listPosts = ({ topic = null, limit = 30 } = {}) =>
      FROM community_posts p
      LEFT JOIN albums al ON al.id = p.album_id
      LEFT JOIN artists ar ON ar.id = p.artist_id
-     ${topic && topic !== 'all' ? 'WHERE p.topic = ?' : ''}
-     ORDER BY p.created_at DESC LIMIT ?`,
+     WHERE p.status = 'published' ${topic && topic !== 'all' ? 'AND p.topic = ?' : ''}
+     ORDER BY p.created_at DESC, p.id DESC LIMIT ?`,
     topic && topic !== 'all' ? [topic, limit] : [limit]
   );
 
 const countPosts = () => get(`SELECT COUNT(*) AS c FROM community_posts`).c;
 
-function createPost({ topic = 'general', title, body, author = 'HIPKOP 社区', albumId = null, artistId = null }) {
+function createPost({ topic = 'general', title, body, author = 'HIPKOP 社区', albumId = null, artistId = null, userId = null, status = 'published' }) {
   const now = nowIso();
   const info = run(
-    `INSERT INTO community_posts (topic, title, body, author, album_id, artist_id, likes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-    [topic, title, body, author, albumId, artistId, now, now]
+    `INSERT INTO community_posts (topic, title, body, author, album_id, artist_id, likes, created_at, updated_at, user_id, status)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+    [topic, title, body, author, albumId, artistId, now, now, userId, status]
   );
   return Number(info.lastInsertRowid || 0);
 }

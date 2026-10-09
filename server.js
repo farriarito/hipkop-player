@@ -16,6 +16,7 @@ const api = require('./src/api');
 const sync = require('./src/sync');
 const scheduler = require('./src/scheduler');
 const log = require('./src/util/logger')('server');
+const security = require('./src/security');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -49,16 +50,24 @@ function serveStatic(req, res, pathname) {
     'Content-Type': MIME[ext] || 'application/octet-stream',
     'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=300'
   });
-  res.end(fs.readFileSync(filePath));
+  fs.createReadStream(filePath).on('error', () => res.destroy()).pipe(res);
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
-  const pathname = url.pathname;
-
+  security.headers(res);
+  let pathname = '';
   try {
+    const url = new URL(req.url, 'http://localhost');
+    pathname = url.pathname;
+    if (req.url.length > 4096) { security.reject(res, 414, 'url_too_long'); return; }
+    if (!security.rateLimit(req, res, 'global', 600)) return;
+    if (!['GET', 'POST', 'HEAD'].includes(req.method)) { security.reject(res, 405, 'method_not_allowed'); return; }
+    if (req.method === 'HEAD') { res.writeHead(200); res.end(); return; }
     if (pathname.startsWith('/media/')) {
-      await media.handleMedia(req, res, url);
+      if (req.method !== 'GET') { security.reject(res, 405, 'method_not_allowed'); return; }
+      if (!security.rateLimit(req, res, 'media', 300)) return;
+      const handled = await media.handleMedia(req, res, url);
+      if (!handled) security.reject(res, 404, 'not_found');
       return;
     }
     if (pathname.startsWith('/api/')) {
@@ -68,15 +77,19 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+    if (req.method !== 'GET') { security.reject(res, 405, 'method_not_allowed'); return; }
     serveStatic(req, res, decodeURIComponent(pathname));
   } catch (error) {
     log.error(`${req.method} ${pathname} failed:`, error.message);
     if (!res.headersSent) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.writeHead(error.status || (error instanceof URIError ? 400 : 500), { 'Content-Type': 'application/json; charset=utf-8' });
     }
-    res.end(JSON.stringify({ error: 'internal_error', message: error.message }));
+    res.end(JSON.stringify({ error: error.status ? error.message : error instanceof URIError ? 'invalid_url' : 'internal_error' }));
   }
 });
+server.requestTimeout = 15000;
+server.headersTimeout = 10000;
+server.keepAliveTimeout = 5000;
 
 function bootstrap() {
   sync.registerSources();

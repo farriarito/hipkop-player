@@ -177,6 +177,21 @@ CREATE TABLE IF NOT EXISTS community_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_topic ON community_posts (topic, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  csrf TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS artist_taxonomy (
   artist_id    TEXT PRIMARY KEY REFERENCES artists (id) ON DELETE CASCADE,
   genre_bucket TEXT,
@@ -196,6 +211,8 @@ CREATE INDEX IF NOT EXISTS idx_artist_taxonomy_status ON artist_taxonomy (status
 // Columns added after the first release. Applied by db.js for databases that
 // already exist, because CREATE TABLE IF NOT EXISTS does not alter old tables.
 const MIGRATIONS = [
+  ['community_posts', 'user_id', 'TEXT REFERENCES users(id)'],
+  ['community_posts', 'status', "TEXT NOT NULL DEFAULT 'published'"],
   ['artists', 'genre_bucket', 'TEXT'],
   ['artists', 'scene', 'TEXT'],
   ['albums', 'genre_bucket', 'TEXT'],

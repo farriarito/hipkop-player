@@ -918,14 +918,17 @@ function openListenById(id) {
   if (item) openListen(item);
 }
 
-function openPostComposer() {
+async function openPostComposer() {
+  try {
+    if (window.HipkopAccount && !await window.HipkopAccount.ensure()) return;
+  } catch { return toast('账号服务暂不可用，请稍后再试'); }
   const topics = (state.community.topics.length ? state.community.topics : DEFAULT_TOPICS).filter((topic) => topic.key !== 'all');
   const works = [...new Map([...state.releases, ...state.charts, ...state.browse.items].map(item => [item.id, item])).values()].slice(0, 50);
   openSheet(`<h3>发布内容</h3>
     <label class="field"><span>话题</span><select id="postTopic">${topics.map((topic) => `<option value="${topic.key}" ${state.community.topic === topic.key ? 'selected' : ''}>${esc(topic.label)}</option>`).join('')}</select></label>
     <label class="field"><span>标题</span><input id="postTitle" maxlength="120" placeholder="一句话说清你想聊什么"></label>
     <label class="field"><span>正文</span><textarea id="postBody" rows="4" maxlength="2000" placeholder="展开说说，或者安利你的宝藏歌手 / 歌曲…"></textarea></label>
-    <label class="field"><span>署名（可选）</span><input id="postAuthor" maxlength="60" placeholder="不填写则显示 HIPKOP 听众"></label>
+    ${window.HipkopAccount && window.HipkopAccount.user() ? `<p>以 ${esc(window.HipkopAccount.user().displayName)} 发声 <button class="ghost" type="button" onclick="HipkopAccount.logout()">退出登录</button></p><input id="postAuthor" type="hidden" value="">` : '<label class="field"><span>署名（可选）</span><input id="postAuthor" maxlength="60" placeholder="不填写则显示 HIPKOP 听众"></label>'}
     <label class="field"><span>附张唱片（可选）</span><select id="postAlbum"><option value="">不关联作品</option>${works.map(item => `<option value="${esc(item.id)}">${esc(item.title)} — ${esc(item.artist)}</option>`).join('')}</select></label>
     <button class="cta" type="button" onclick="submitPost(this)">发布</button>`);
 }
@@ -943,13 +946,15 @@ async function submitPost(button) {
     submit.setAttribute('aria-busy', 'true');
     submit.textContent = '发布中…';
   }
+  let published = true;
   try {
     const response = await fetch('/api/community/posts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(window.HipkopAccount ? window.HipkopAccount.headers() : {}) },
       body: JSON.stringify({ topic, title, body, author: $('#postAuthor').value.trim(), albumId: $('#postAlbum').value || null })
     });
     if (!response.ok) throw new Error(`http_${response.status}`);
+    published = (await response.json()).status !== 'pending';
   } catch (error) {
     if (submit) {
       submit.disabled = false;
@@ -959,7 +964,7 @@ async function submitPost(button) {
     return toast('发布失败，请稍后再试');
   }
   closeSheet();
-  toast('已发布');
+  toast(published ? '已发布' : '已提交，审核通过后出现在社区');
   state.community.topic = topic;
   await paint();
 }
@@ -1031,7 +1036,7 @@ async function showStatus() {
   openSheet(`<h3>目录与 Provider 状态</h3>
     <div class="stat-strip compact"><div><b>${esc(data.stats.artists)}</b><span>艺人</span></div><div><b>${esc(data.stats.albums)}</b><span>专辑</span></div><div><b>${esc(data.stats.tracks)}</b><span>曲目</span></div></div>
     <div class="status-list">${providers}</div>
-    <p class="sheet-note">一致性检查：${issues.length ? issues.map(([key, value]) => `${esc(key)} ${esc(value)}`).join(' · ') : '全部通过 ✓'}</p>`);
+    <p class="sheet-note">${data.consistency ? `一致性检查：${issues.length ? issues.map(([key, value]) => `${esc(key)} ${esc(value)}`).join(' · ') : '全部通过 ✓'}` : '详细诊断仅向管理员开放'}</p>`);
 }
 
 /* --------------------------------- boot ----------------------------------- */

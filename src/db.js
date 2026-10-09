@@ -15,6 +15,7 @@ fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 fs.mkdirSync(config.mediaDir, { recursive: true });
 
 const db = new DatabaseSync(config.dbPath);
+db.exec('PRAGMA busy_timeout = 5000;');
 db.exec(SCHEMA);
 
 // CREATE TABLE IF NOT EXISTS never adds columns to an existing table, so apply
